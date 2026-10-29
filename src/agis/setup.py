@@ -131,9 +131,9 @@ def run_setup(console: Console, model: str | None = None, host: str | None = Non
     path = config_mod.save(choice.name, host)
     console.print(f"Saved settings to {path}")
     console.print('\n[bold green]Ready.[/bold green] In a folder with GIS files, try:\n'
+                  "  agis\n"
                   '  agis "what is in this folder?"\n'
-                  '  agis "reproject roads.shp to web mercator"\n'
-                  "  agis repl")
+                  '  agis "reproject roads.shp to web mercator"')
 
 
 def run_doctor(console: Console, host: str | None = None) -> bool:

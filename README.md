@@ -31,12 +31,14 @@ If something isn't working, run `agis doctor` and include its output in bug repo
 ## Usage
 
 ```bash
+agis                          # interactive prompt; later requests can say "now buffer that"
 agis "reproject parcels.shp to EPSG:2227"
 agis "buffer the streams by 30 m and remove that from parcels, save as buildable.gpkg"
 agis "make web map tiles from ortho.tif up to zoom 16"
 agis "what projection is dem.tif in?"
-agis repl                     # interactive; later requests can say "now buffer that"
 ```
+
+`agis` on its own opens the prompt. Arrow keys move through the line you are typing, and up and down walk requests from this session and from earlier ones (`~/.config/agis/history`). `exit` or Ctrl-D quits. A quoted request still runs once and exits.
 
 agis reads the files in the current folder (CRS, geometry type, fields, raster bands) so the model knows what it's working with. It always shows the plan before running it.
 

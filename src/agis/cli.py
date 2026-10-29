@@ -20,7 +20,8 @@ app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="rich",
     help="Natural-language GIS on your own machine.\n\n"
-    'Example: [bold]agis "clip roads.gpkg to county.shp and reproject to 3857"[/bold]',
+    "Run [bold]agis[/bold] for an interactive prompt, or pass one request:\n"
+    '[bold]agis "clip roads.gpkg to county.shp and reproject to 3857"[/bold]',
 )
 
 ModelOpt = Annotated[str | None, typer.Option("--model", "-m", help="Ollama model to use.")]
@@ -86,14 +87,23 @@ def repl(
 
     session = _session(model, host, directory)
     options = Options(yes=yes, force=force, verbose=verbose)
+    prompt = _prompt_session()
     console.print(f"agis {__version__} using [bold]{session.backend.model}[/bold] in "
                   f"{session.cwd}. Type a request, or 'exit' to quit.")
     while True:
         try:
-            request = console.input("[bold cyan]agis>[/bold cyan] ").strip()
-        except (EOFError, KeyboardInterrupt):
+            request = _read_request(prompt)
+        except EOFError:
             console.print()
             return
+        except KeyboardInterrupt:
+            # At the prompt, cancel this line and keep the session. A Ctrl-C during a
+            # run is handled inside the loop below and also returns here.
+            if prompt is None:
+                console.print()
+                return
+            console.print()
+            continue
         if request.lower() in ("exit", "quit", ":q"):
             return
         if not request:
@@ -176,14 +186,69 @@ class _errors:
 
 SUBCOMMANDS = {"run", "repl", "setup", "doctor", "eval"}
 ROOT_FLAGS = {"--help", "-h", "--version"}
+# Flags accepted by both `run` and `repl`. True when the next argv token is the value,
+# unless the flag is written as --name=value.
+_SHARED_FLAGS = {
+    "-y": False, "--yes": False,
+    "-f": False, "--force": False,
+    "-v": False, "--verbose": False,
+    "-m": True, "--model": True,
+    "--host": True,
+    "-C": True, "--dir": True,
+}
+
+
+def argv_for(args: list[str]) -> list[str]:
+    """Turn a bare invocation into the repl, and a request into `run`.
+
+    Flags with no request (`agis -C ~/data`) also open the repl. A run-only flag such as
+    `--dry-run` still goes to `run`, so a missing request is reported there.
+    """
+    if not args:
+        return ["repl"]
+    if args[0] in SUBCOMMANDS or args[0] in ROOT_FLAGS:
+        return list(args)
+    if _only_shared_flags(args):
+        return ["repl", *args]
+    return ["run", *args]
+
+
+def _only_shared_flags(args: list[str]) -> bool:
+    index = 0
+    while index < len(args):
+        name, separator, _value = args[index].partition("=")
+        if name not in _SHARED_FLAGS:
+            return False
+        takes_value = _SHARED_FLAGS[name] and not separator
+        index += 2 if takes_value else 1
+        if takes_value and index > len(args):
+            return False
+    return True
+
+
+def _prompt_session():
+    """Line editor with history on a terminal, or None when stdin is piped."""
+    if not sys.stdin.isatty():
+        return None
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.history import FileHistory
+
+    path = config_mod.config_path().parent / "history"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return PromptSession(history=FileHistory(str(path)))
+
+
+def _read_request(prompt) -> str:
+    if prompt is None:
+        return input("agis> ").strip()
+    from prompt_toolkit.formatted_text import HTML
+
+    return prompt.prompt(HTML("<b><ansicyan>agis></ansicyan></b> ")).strip()
 
 
 def main() -> None:
-    """Entry point. Anything that isn't a subcommand is treated as a request for `run`."""
-    args = sys.argv[1:]
-    if args and args[0] not in SUBCOMMANDS and args[0] not in ROOT_FLAGS:
-        args = ["run", *args]
-    app(args=args, prog_name="agis")
+    """Entry point. A bare `agis` opens the repl; other text is a one-shot request."""
+    app(args=argv_for(sys.argv[1:]), prog_name="agis")
 
 
 if __name__ == "__main__":
