@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from prompt_toolkit.completion import Completer, Completion
 from rich.console import Console
 from rich.markup import escape
 
 from agis import __version__
 from agis import config as config_mod
 from agis.errors import AgisError, PlanError, StepError
+
+# A file token, so "roads.gpkg" is one word and Tab can finish it.
+_FILE_WORD = re.compile(r"[^\s\"']+")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -87,7 +92,7 @@ def repl(
 
     session = _session(model, host, directory)
     options = Options(yes=yes, force=force, verbose=verbose)
-    prompt = _prompt_session()
+    prompt = _prompt_session(session.cwd)
     console.print(f"agis {__version__} using [bold]{session.backend.model}[/bold] in "
                   f"{session.cwd}. Type a request, or 'exit' to quit.")
     while True:
@@ -226,8 +231,8 @@ def _only_shared_flags(args: list[str]) -> bool:
     return True
 
 
-def _prompt_session():
-    """Line editor with history on a terminal, or None when stdin is piped."""
+def _prompt_session(cwd: Path):
+    """Line editor with history and file completion, or None when stdin is piped."""
     if not sys.stdin.isatty():
         return None
     from prompt_toolkit import PromptSession
@@ -235,7 +240,28 @@ def _prompt_session():
 
     path = config_mod.config_path().parent / "history"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return PromptSession(history=FileHistory(str(path)))
+    return PromptSession(history=FileHistory(str(path)), completer=DatasetCompleter(cwd),
+                         complete_while_typing=False)
+
+
+class DatasetCompleter(Completer):
+    """Tab-completes dataset names in one directory. Listing them does not open the files."""
+
+    def __init__(self, cwd: Path):
+        self.cwd = cwd
+
+    def get_completions(self, document, complete_event):
+        from agis.context import find_datasets
+
+        word = document.get_word_before_cursor(pattern=_FILE_WORD)
+        if not word:
+            return
+        prefix = word.casefold()
+        for path in find_datasets(self.cwd):
+            name = path.name
+            if name.casefold().startswith(prefix):
+                insert = f'"{name}"' if " " in name else name
+                yield Completion(insert, start_position=-len(word), display=name)
 
 
 def _read_request(prompt) -> str:

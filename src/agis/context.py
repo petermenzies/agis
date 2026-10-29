@@ -24,16 +24,27 @@ class Context:
     datasets: list[Path]
     mentioned: list[Path]
     recent: list[Path] = field(default_factory=list)
+    cache: dict | None = None
 
     def render(self) -> str:
         lines = [f"Working directory: {self.cwd}"]
-        described = _unique([*self.mentioned, *self.recent, *self.datasets])[:MAX_DESCRIBED]
+        # A request that names files only opens those, plus anything this session wrote.
+        # A request that names nothing ("what is in this folder?") describes the first few.
+        if self.mentioned or self.recent:
+            described = _unique([*self.mentioned, *self.recent])
+        else:
+            described = self.datasets[:MAX_DESCRIBED]
         if described:
             lines.append("Files:")
-            lines += [f"- {describe(p, base=self.cwd)}" for p in described]
-        others = [p for p in self.datasets if p not in described][: MAX_LISTED - len(described)]
-        if others:
-            lines.append("Other files: " + ", ".join(_rel(p, self.cwd) for p in others))
+            lines += [f"- {cached_describe(p, self.cwd, cache=self.cache)}" for p in described]
+        described_keys = {p.resolve() for p in described}
+        others = [p for p in self.datasets if p.resolve() not in described_keys]
+        shown, extra = others[:MAX_LISTED], len(others) - MAX_LISTED
+        if shown:
+            names = ", ".join(_rel(p, self.cwd) for p in shown)
+            if extra > 0:
+                names += f", and {extra} more"
+            lines.append("Other files: " + names)
         if not self.datasets and not self.recent:
             lines.append("Files: none found in the working directory.")
         if self.recent:
@@ -42,11 +53,13 @@ class Context:
         return "\n".join(lines)
 
 
-def build_context(prompt: str, cwd: Path, recent: list[Path] | None = None) -> Context:
+def build_context(prompt: str, cwd: Path, recent: list[Path] | None = None,
+                  cache: dict | None = None) -> Context:
     datasets = find_datasets(cwd)
     recent = [p for p in (recent or []) if p.exists()]
     return Context(cwd=cwd, datasets=datasets,
-                   mentioned=mentioned_files(prompt, cwd, [*datasets, *recent]), recent=recent)
+                   mentioned=mentioned_files(prompt, cwd, [*datasets, *recent]),
+                   recent=recent, cache=cache)
 
 
 def find_datasets(cwd: Path) -> list[Path]:
@@ -65,6 +78,23 @@ def mentioned_files(prompt: str, cwd: Path, datasets: list[Path]) -> list[Path]:
     words = {w.lower() for w in re.findall(r"[\w-]+", prompt)}
     found += [p for p in datasets if p.stem.lower() in words or p.name.lower() in words]
     return _unique(found)
+
+
+def cached_describe(path: Path, base: Path | None = None, detailed: bool = False,
+                    cache: dict | None = None) -> str:
+    """describe(), reused while the file's size and mtime stay the same."""
+    if cache is None:
+        return describe(path, base=base, detailed=detailed)
+    try:
+        stat = path.stat()
+        key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, detailed)
+    except OSError:
+        return describe(path, base=base, detailed=detailed)
+    text = cache.get(key)
+    if text is None:
+        text = describe(path, base=base, detailed=detailed)
+        cache[key] = text
+    return text
 
 
 def describe(path: Path, base: Path | None = None, detailed: bool = False) -> str:
@@ -86,7 +116,9 @@ def describe(path: Path, base: Path | None = None, detailed: bool = False) -> st
 
 
 def _describe_vector(path: Path, detailed: bool) -> str:
-    info = pyogrio.read_info(path, force_total_bounds=True)
+    # Header metadata is enough for planning. Scanning every feature for bounds is reserved
+    # for `info`, which asks for the detailed summary.
+    info = pyogrio.read_info(path, force_total_bounds=detailed)
     crs = CRS.from_user_input(info["crs"]) if info.get("crs") else None
     fields = [f"{n}:{_short_dtype(t)}" for n, t in zip(info["fields"], info["dtypes"])]
     shown = fields if detailed else fields[:MAX_FIELDS]
@@ -101,13 +133,24 @@ def _describe_vector(path: Path, detailed: bool) -> str:
 
 
 def _describe_table(path: Path, detailed: bool) -> str:
-    from agis.ops.io import read_table
+    """Column types from a short sample. The row count is a line count, not a full parse."""
+    import pandas as pd
 
-    table = read_table(path)
-    fields = [f"{name}:{_pandas_dtype(table[name])}" for name in table.columns]
+    from agis.ops.io import TABLE_SEPARATORS
+
+    separator = TABLE_SEPARATORS.get(path.suffix.lower(), ",")
+    rows = _count_data_rows(path)
+    sample = pd.read_csv(path, sep=separator, nrows=100)
+    fields = [f"{name}:{_pandas_dtype(sample[name])}" for name in sample.columns]
     shown = fields if detailed else fields[:MAX_FIELDS]
     more = "" if len(shown) == len(fields) else f", +{len(fields) - len(shown)} more"
-    return f"table, {len(table)} rows, fields [{', '.join(shown)}{more}]"
+    return f"table, {rows} rows, fields [{', '.join(shown)}{more}]"
+
+
+def _count_data_rows(path: Path) -> int:
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        next(handle, None)
+        return sum(1 for line in handle if line.strip())
 
 
 def _pandas_dtype(series) -> str:

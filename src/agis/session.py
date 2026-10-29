@@ -35,11 +35,12 @@ class Session:
     cwd: Path
     console: Console = field(default_factory=Console)
     recent: list[Path] = field(default_factory=list)
+    summaries: dict = field(default_factory=dict)
 
     def handle(self, request: str, options: Options) -> list[Path]:
         """Run one request and return the files it created."""
         planner = Planner(self.backend)
-        context = build_context(request, self.cwd, self.recent)
+        context = build_context(request, self.cwd, self.recent, self.summaries)
         if options.verbose:
             self.console.print(context.render() + "\n", style="dim", markup=False)
 
