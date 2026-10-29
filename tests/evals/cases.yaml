@@ -1,0 +1,159 @@
+# Each case is a request against the sample data in agis/sample_data.py and the plan we
+# expect. Only the listed arguments are compared; others may be anything. An empty
+# `expect` means the model should decline (return no steps).
+#
+# Sample files: roads.gpkg (lines, 4326), county.shp (polygon, 3310), parks.geojson
+# (polygons, 4326), zones.gpkg (polygons, 4326, field "zone"),
+# zone_stats.csv (zone, households), dem.tif (float32, 32610),
+# ortho.tif (RGB uint8, 32610).
+
+- id: reproject-alias
+  prompt: put the roads in web mercator
+  expect:
+    - {op: reproject, input: roads.gpkg, crs: "EPSG:3857"}
+
+- id: reproject-raster-latlon
+  prompt: reproject dem.tif to lat/long
+  expect:
+    - {op: reproject, input: dem.tif, crs: "EPSG:4326"}
+
+- id: reproject-utm
+  prompt: project zones into the local UTM zone
+  expect:
+    - {op: reproject, input: zones.gpkg, crs: utm}
+
+- id: reproject-match-file
+  prompt: reproject parks so it matches the county's projection
+  expect:
+    - {op: reproject, input: parks.geojson, crs: "EPSG:3310"}
+
+- id: clip-mask
+  prompt: clip roads to the county boundary
+  expect:
+    - {op: clip, input: roads.gpkg, mask: county.shp}
+
+- id: clip-bbox
+  prompt: clip the dem to the box -122.45, 37.75, -122.42, 37.78
+  expect:
+    - {op: clip, input: dem.tif, bbox: [-122.45, 37.75, -122.42, 37.78]}
+
+- id: clip-raster-to-polygons
+  prompt: cut ortho.tif down to just the parks
+  expect:
+    - {op: clip, input: ortho.tif, mask: parks.geojson}
+
+- id: difference
+  prompt: remove the park areas from zones
+  expect:
+    - {op: difference, input: zones.gpkg, other: parks.geojson}
+
+- id: union
+  prompt: union zones with parks
+  expect:
+    - {op: union, input: zones.gpkg, other: parks.geojson}
+
+- id: buffer-meters
+  prompt: buffer roads by 100 meters
+  expect:
+    - {op: buffer, input: roads.gpkg, distance: 100, units: meters}
+
+- id: buffer-miles
+  prompt: make a 1 mile buffer around the parks
+  expect:
+    - {op: buffer, input: parks.geojson, distance: 1, units: miles}
+
+- id: dissolve-by
+  prompt: dissolve zones by zone type
+  expect:
+    - {op: dissolve, input: zones.gpkg, by: zone}
+
+- id: dissolve-all
+  prompt: merge all the zones into a single shape
+  expect:
+    - {op: dissolve, input: zones.gpkg, by: null}
+
+- id: convert-geojson
+  prompt: convert roads to geojson
+  expect:
+    - {op: convert, input: roads.gpkg, format: geojson}
+
+- id: convert-cog
+  prompt: turn dem.tif into a cloud optimized geotiff
+  expect:
+    - {op: convert, input: dem.tif, format: cog}
+
+- id: tile-zooms
+  prompt: make xyz tiles of the dem for zooms 10 through 13
+  expect:
+    - {op: tile_raster, input: dem.tif, min_zoom: 10, max_zoom: 13}
+
+- id: info
+  prompt: what projection is the county in?
+  expect:
+    - {op: info, input: county.shp}
+
+- id: chain-clip-buffer
+  prompt: clip roads to the county, then buffer them by 25 m
+  expect:
+    - {op: clip, input: roads.gpkg, mask: county.shp}
+    - {op: buffer, input: $step1, distance: 25, units: meters}
+
+- id: chain-buffer-difference-named
+  prompt: buffer the parks by 500 feet and subtract that from zones. save as zones_no_parks.gpkg
+  expect:
+    - {op: buffer, input: parks.geojson, distance: 500, units: feet}
+    - {op: difference, input: zones.gpkg, other: $step1, output: zones_no_parks.gpkg}
+
+- id: chain-clip-tile
+  prompt: clip the dem to the county and make web tiles up to zoom 13
+  expect:
+    - {op: clip, input: dem.tif, mask: county.shp}
+    - {op: tile_raster, input: $step1, max_zoom: 13}
+
+- id: filter-equals
+  prompt: keep only the residential zones
+  expect:
+    - op: filter
+      input: zones.gpkg
+      where:
+        - {field: zone, op: "==", value: residential}
+
+- id: filter-compare
+  prompt: roads with 6 or more lanes
+  expect:
+    - op: filter
+      input: roads.gpkg
+      where:
+        - {field: lanes, op: ">=", value: "6"}
+
+- id: select-columns
+  prompt: from parks keep only the name and acres columns
+  expect:
+    - op: select
+      input: parks.geojson
+      columns: [name, acres]
+
+- id: join-csv
+  prompt: join zone_stats.csv onto the zones
+  expect:
+    - {op: join, input: zones.gpkg, table: zone_stats.csv}
+
+- id: filter-then-select
+  prompt: from zones keep the residential ones and only the zone column, save as residential.gpkg
+  expect:
+    - op: filter
+      input: zones.gpkg
+      where:
+        - {field: zone, op: "==", value: residential}
+    - op: select
+      input: $step1
+      columns: [zone]
+      output: residential.gpkg
+
+- id: decline-unsupported
+  prompt: make a hillshade from the dem
+  expect: []
+
+- id: decline-missing-file
+  prompt: clip rivers.shp to the county
+  expect: []

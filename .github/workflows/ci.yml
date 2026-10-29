@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, to catch a dependency release that drops a macOS wheel.
+    - cron: "0 9 * * 1"
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15, macos-15-intel]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install -e ".[dev]"
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync pytest -q
+
+  clean-install:
+    # Mirrors what a user does: install the built wheel as a uv tool on a bare runner,
+    # refusing to compile anything, then run the CLI and the smoke test.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --wheel
+      - name: Install the wheel as a tool, with no source builds allowed
+        run: uv tool install --no-build --python 3.12 dist/*.whl
+      - run: agis --version
+      - run: agis --help
+      - name: Smoke test with the tool's own Python
+        run: |
+          TOOL_PY="$(uv tool dir)/agis/bin/python"
+          "$TOOL_PY" scripts/smoke_test.py
+      - name: doctor runs (Ollama is absent on CI, so a failing exit is expected)
+        run: agis doctor || true

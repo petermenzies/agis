@@ -1,0 +1,123 @@
+import json
+
+import geopandas as gpd
+import pytest
+from rich.console import Console
+
+from agis.crs import resolve_crs
+from agis.errors import PlanError, StepError
+from agis.executor import resolve, run
+from agis.ops.geoprocessing import Buffer, Clip, Difference, Dissolve, Reproject
+from agis.plan import Plan, plan_schema
+from agis.session import Options, Session
+
+
+def test_chain_uses_intermediate_and_lineage_name(data, tmp_path):
+    plan = Plan(steps=[Clip(input="roads.gpkg", mask="county.shp"),
+                       Reproject(input="$step1", crs="web mercator")])
+    work = tmp_path / "work"
+    steps = resolve(plan, tmp_path, work)
+    assert steps[0].temporary and steps[0].output.parent == work
+    assert steps[1].output == (tmp_path / "roads_clipped_3857.gpkg").resolve()
+    run(steps)
+    assert gpd.read_file(steps[1].output).crs.to_epsg() == 3857
+
+
+def test_missing_file_and_bad_ref_reported_together(data, tmp_path):
+    plan = Plan(steps=[Buffer(input="rivers.shp", distance=5),
+                       Dissolve(input="$step3")])
+    with pytest.raises(PlanError) as exc:
+        resolve(plan, tmp_path, tmp_path / "w")
+    assert len(exc.value.problems) == 2 and exc.value.retryable
+
+
+def test_extension_is_optional(data, tmp_path):
+    steps = resolve(Plan(steps=[Dissolve(input="zones")]), tmp_path, tmp_path / "w")
+    assert steps[0].inputs["input"].name == "zones.gpkg"
+
+
+def test_existing_output_is_not_retryable(data, tmp_path):
+    (tmp_path / "zones_dissolved.gpkg").write_text("x")
+    plan = Plan(steps=[Dissolve(input="zones.gpkg")])
+    with pytest.raises(PlanError) as exc:
+        resolve(plan, tmp_path, tmp_path / "w")
+    assert not exc.value.retryable
+    assert resolve(plan, tmp_path, tmp_path / "w", force=True)
+
+
+def test_output_cannot_overwrite_input(data, tmp_path):
+    plan = Plan(steps=[Dissolve(input="zones.gpkg", output="zones.gpkg")])
+    with pytest.raises(PlanError, match="overwrite its input"):
+        resolve(plan, tmp_path, tmp_path / "w", force=True)
+
+
+def test_kind_mismatch(data, tmp_path):
+    plan = Plan(steps=[Difference(input="dem.tif", other="parks.geojson")])
+    with pytest.raises(PlanError, match="needs vector"):
+        resolve(plan, tmp_path, tmp_path / "w")
+
+
+def test_failed_run_removes_its_outputs(data, tmp_path):
+    plan = Plan(steps=[Dissolve(input="zones.gpkg", output="a.gpkg"),
+                       Dissolve(input="zones.gpkg", by="nope", output="b.gpkg")])
+    with pytest.raises(StepError):
+        run(resolve(plan, tmp_path, tmp_path / "w"))
+    assert not (tmp_path / "a.gpkg").exists()
+
+
+def test_schema_requires_op():
+    for definition in plan_schema()["$defs"].values():
+        if "op" in definition.get("properties", {}):
+            assert definition["required"][0] == "op"
+
+
+@pytest.mark.parametrize("text,code", [("3857", 3857), ("EPSG:4326", 4326), ("epsg 2227", 2227),
+                                       ("web mercator", 3857), ("WGS84", 4326)])
+def test_resolve_crs(text, code):
+    assert resolve_crs(text).to_epsg() == code
+
+
+class FakeBackend:
+    model = "fake"
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def generate_json(self, messages, schema):
+        self.calls.append(messages)
+        return json.dumps(self.responses.pop(0))
+
+
+def test_session_replans_after_step_failure(data, tmp_path):
+    backend = FakeBackend([
+        {"steps": [{"op": "dissolve", "input": "zones.gpkg", "by": "landuse"}]},
+        {"steps": [{"op": "dissolve", "input": "zones.gpkg", "by": "zone"}]},
+    ])
+    session = Session(backend, tmp_path, console=Console(quiet=True))
+    created = session.handle("dissolve zones by land use", Options(yes=True))
+    assert [p.name for p in created] == ["zones_dissolved_zone.gpkg"]
+    assert "no field named 'landuse'" in backend.calls[1][-1]["content"]
+    assert session.recent == created
+
+
+def test_session_replans_after_invalid_json(data, tmp_path):
+    backend = FakeBackend([
+        {"steps": [{"op": "clip", "input": "roads.gpkg"}]},
+        {"steps": [{"op": "clip", "input": "roads.gpkg", "mask": "county.shp"}]},
+    ])
+    session = Session(backend, tmp_path, console=Console(quiet=True))
+    assert session.handle("clip roads", Options(yes=True))
+
+
+def test_session_dry_run_writes_nothing(data, tmp_path):
+    backend = FakeBackend([{"steps": [{"op": "dissolve", "input": "zones.gpkg"}]}])
+    session = Session(backend, tmp_path, console=Console(quiet=True))
+    assert session.handle("dissolve zones", Options(dry_run=True)) == []
+    assert not (tmp_path / "zones_dissolved.gpkg").exists()
+
+
+def test_session_empty_plan(data, tmp_path):
+    backend = FakeBackend([{"steps": [], "message": "Slope isn't supported."}])
+    session = Session(backend, tmp_path, console=Console(quiet=True))
+    assert session.handle("slope of dem", Options(yes=True)) == []
