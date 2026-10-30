@@ -8,6 +8,7 @@ from agis.crs import resolve_crs
 from agis.errors import PlanError, StepError
 from agis.executor import resolve, run
 from agis.ops.geoprocessing import Buffer, Clip, Difference, Dissolve, Reproject
+from agis.ops.merge import Merge
 from agis.plan import Plan, plan_schema
 from agis.session import Options, Session
 
@@ -55,6 +56,37 @@ def test_kind_mismatch(data, tmp_path):
     plan = Plan(steps=[Difference(input="dem.tif", other="parks.geojson")])
     with pytest.raises(PlanError, match="needs vector"):
         resolve(plan, tmp_path, tmp_path / "w")
+
+
+def test_merge_resolves_a_step_and_several_files(data, tmp_path):
+    plan = Plan(steps=[
+        Buffer(input="parks.geojson", distance=10),
+        Merge(input="zones.gpkg", others=["$step1", "county.shp"]),
+    ])
+    steps = resolve(plan, tmp_path, tmp_path / "w")
+    assert steps[1].inputs["others"] == [steps[0].output, data["county"].resolve()]
+    assert steps[1].output == (tmp_path / "zones_merged.gpkg").resolve()
+    run(steps)
+    assert len(gpd.read_file(steps[1].output)) == 15
+
+
+def test_merge_rejects_a_raster(data, tmp_path):
+    plan = Plan(steps=[Merge(input="zones.gpkg", others=["dem.tif"])])
+    with pytest.raises(PlanError, match="needs vector"):
+        resolve(plan, tmp_path, tmp_path / "w")
+
+
+def test_merge_reports_a_missing_file(data, tmp_path):
+    plan = Plan(steps=[Merge(input="zones.gpkg", others=["parks.geojson", "missing.geojson"])])
+    with pytest.raises(PlanError, match="missing.geojson"):
+        resolve(plan, tmp_path, tmp_path / "w")
+
+
+def test_merge_output_cannot_overwrite_an_appended_file(data, tmp_path):
+    plan = Plan(steps=[Merge(input="zones.gpkg", others=["parks.geojson"],
+                             output="parks.geojson")])
+    with pytest.raises(PlanError, match="overwrite its input"):
+        resolve(plan, tmp_path, tmp_path / "w", force=True)
 
 
 def test_failed_run_removes_its_outputs(data, tmp_path):

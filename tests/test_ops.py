@@ -14,13 +14,14 @@ from agis.ops.geoprocessing import (
     Reproject,
     Union,
 )
+from agis.ops.merge import Merge
 from agis.ops.tiling import TileRaster
 
 
 def test_registry_has_all_ops():
     assert set(REGISTRY) == {
         "reproject", "clip", "difference", "union", "buffer", "dissolve", "convert", "info",
-        "tile_raster", "filter", "select", "join",
+        "tile_raster", "filter", "select", "join", "merge",
     }
 
 
@@ -88,6 +89,57 @@ def test_union_rejects_lines(data, tmp_path):
     with pytest.raises(AgisError):
         Union(input="roads.gpkg", other="parks.geojson").run(
             {"input": data["roads"], "other": data["parks"]}, tmp_path / "u.gpkg"
+        )
+
+
+def test_merge_appends_rows_and_lines_up_columns(data, tmp_path):
+    out = tmp_path / "merged.gpkg"
+    result = Merge(input="zones.gpkg", others=["parks.geojson"]).run(
+        {"input": data["zones"], "others": [data["parks"]]}, out
+    )
+    merged = gpd.read_file(out)
+    assert len(merged) == 14
+    assert merged.crs.to_epsg() == 4326
+    assert {"zone", "name", "acres"} <= set(merged.columns)
+    assert merged["zone"].isna().sum() == 2
+    assert result.message.startswith("14 features (12 + 2)")
+
+
+def test_merge_reprojects_to_the_input_crs(data, tmp_path):
+    out = tmp_path / "merged.gpkg"
+    result = Merge(input="zones.gpkg", others=["county.shp"]).run(
+        {"input": data["zones"], "others": [data["county"]]}, out
+    )
+    merged = gpd.read_file(out)
+    study = merged[merged["name"] == "Study Area"].geometry.iloc[0]
+    assert len(merged) == 13
+    assert merged.crs.to_epsg() == 4326
+    assert study.centroid.x == pytest.approx(-122.435, abs=0.02)
+    assert "reprojected county.shp to EPSG:4326" in result.message
+
+
+def test_merge_appends_several_files(data, tmp_path):
+    out = tmp_path / "all.gpkg"
+    Merge(input="roads.gpkg", others=["parks.geojson", "zones.gpkg"]).run(
+        {"input": data["roads"], "others": [data["parks"], data["zones"]]}, out
+    )
+    merged = gpd.read_file(out)
+    assert len(merged) == 18
+    assert set(merged.geom_type) == {"LineString", "Polygon"}
+
+
+def test_merge_requires_a_crs_to_match_the_input(data, tmp_path):
+    import warnings
+
+    from shapely.geometry import box
+
+    bare = tmp_path / "bare.gpkg"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        gpd.GeoDataFrame({"name": ["a"]}, geometry=[box(0, 0, 1, 1)]).to_file(bare)
+    with pytest.raises(AgisError, match="no CRS"):
+        Merge(input="zones.gpkg", others=["bare.gpkg"]).run(
+            {"input": data["zones"], "others": [bare]}, tmp_path / "out.gpkg"
         )
 
 

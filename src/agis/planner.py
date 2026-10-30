@@ -13,6 +13,7 @@ from agis.llm import Backend, Message
 from agis.ops.attributes import Condition, Filter, Select
 from agis.ops.geoprocessing import Buffer, Clip, Difference, Info, Reproject
 from agis.ops.join import Join
+from agis.ops.merge import Merge
 from agis.ops.tiling import TileRaster
 from agis.plan import Plan, describe_ops, plan_schema
 
@@ -29,11 +30,14 @@ other) to "$stepN", where N is the 1-based position of that step.
 "all" means and, "any" means or. Use select to keep columns. Don't reproject for these.
 - Use join to attach a CSV or another layer's attributes to a vector layer. Leave left_on and \
 right_on empty when the files share one column name.
+- Use merge to append the rows of vector files into one layer. The first file is input; every \
+other file goes in others, in the order given. Columns line up by name. Use dissolve only when \
+geometries should be combined into fewer shapes, and union for a polygon overlay.
 - Only set "output" when the user names an output file. Otherwise leave it out; names are \
 generated automatically.
-- Only add the steps the user asked for. Clip, difference, union and buffer handle different \
-CRSs themselves, so don't add reproject steps for them. Buffer accepts meters, kilometers, \
-feet or miles, so keep the user's distance and units as given.
+- Only add the steps the user asked for. Clip, difference, union, buffer and merge handle \
+different CRSs themselves, so don't add reproject steps for them. Buffer accepts meters, \
+kilometers, feet or miles, so keep the user's distance and units as given.
 - Write CRSs as EPSG codes when you know them, e.g. "EPSG:3857" for web mercator.
 - If the request can't be done with these operations, or refers to a file that isn't listed, \
 return an empty steps list and explain why in message. Never substitute a different operation \
@@ -99,6 +103,15 @@ EXAMPLES = [
         plan=Plan(
             steps=[Join(input="parcels.shp", table="owners.csv")],
             message="Join owners.csv onto the parcels using the shared apn column.",
+        ),
+    ),
+    Example(
+        files="- zones.gpkg: vector, Polygon, 12 features, EPSG:4326, fields [zone:str]\n"
+        "- parks.geojson: vector, Polygon, 2 features, EPSG:4326, fields [name:str, acres:float]",
+        request="append the parks onto the zones",
+        plan=Plan(
+            steps=[Merge(input="zones.gpkg", others=["parks.geojson"])],
+            message="Append the park features onto the zones.",
         ),
     ),
     Example(

@@ -255,7 +255,10 @@ class Dissolve(OpArgs):
     )
     output: str | None = Field(None, description=OUTPUT_DESC)
 
-    summary: ClassVar = "Merge vector features, optionally grouped by a field."
+    summary: ClassVar = (
+        "Combine geometries into one feature, optionally grouped by a field. "
+        "This is not for stacking files; use merge to append features."
+    )
 
     def suffix(self) -> str:
         return f"dissolved_{self.by}" if self.by else "dissolved"

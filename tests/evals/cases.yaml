@@ -52,6 +52,13 @@
   expect:
     - {op: union, input: zones.gpkg, other: parks.geojson}
 
+- id: merge-append
+  prompt: append the parks onto the zones
+  expect:
+    - op: merge
+      input: zones.gpkg
+      others: [parks.geojson]
+
 - id: buffer-meters
   prompt: buffer roads by 100 meters
   expect:

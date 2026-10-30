@@ -22,7 +22,7 @@ SHAPEFILE_PARTS = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qix", ".sbn", ".sbx
 class ResolvedStep:
     number: int
     args: OpArgs
-    inputs: dict[str, Path]
+    inputs: dict[str, Path | list[Path]]
     output: Path | None
     kind: Kind | None
     temporary: bool
@@ -39,7 +39,8 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
     resolved: list[ResolvedStep] = []
     referenced = {
         n for step in plan.steps for name in step.input_fields
-        if (n := step_ref(getattr(step, name, None))) is not None
+        for value in _texts(getattr(step, name, None))
+        if (n := step_ref(value)) is not None
     }
     final_paths: set[Path] = set()
     existing: list[str] = []
@@ -48,32 +49,52 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
         raise PlanError([plan.message or "the plan has no steps"])
 
     for number, args in enumerate(plan.steps, start=1):
-        inputs: dict[str, Path] = {}
-        kinds: dict[str, Kind] = {}
+        inputs: dict[str, Path | list[Path]] = {}
+        kinds: dict[str, Kind | list[Kind]] = {}
         stem = None
         for name in args.input_fields:
-            value = getattr(args, name, None)
-            if value is None:
+            raw = getattr(args, name, None)
+            if raw is None:
                 continue
-            ref = step_ref(value)
-            if ref is not None:
-                if not 1 <= ref < number:
-                    problems.append(f"step {number}: {name} refers to $step{ref}, "
-                                    "which isn't an earlier step")
-                    continue
-                source = resolved[ref - 1] if ref - 1 < len(resolved) else None
-                if source is None or source.output is None or source.kind is None:
-                    problems.append(f"step {number}: $step{ref} doesn't produce a file to use")
-                    continue
-                inputs[name], kinds[name] = source.output, source.kind
-                stem = stem or source.stem
-            else:
-                path = find_input(value, cwd)
-                if path is None:
-                    problems.append(f"step {number}: file {value!r} not found")
-                    continue
-                inputs[name], kinds[name] = path, data_kind(path)
-                stem = stem or path.stem
+            values = _texts(raw)
+            if not values:
+                problems.append(f"step {number}: {name} has no files")
+                continue
+            paths: list[Path] = []
+            field_kinds: list[Kind] = []
+            ok = True
+            for value in values:
+                ref = step_ref(value)
+                if ref is not None:
+                    if not 1 <= ref < number:
+                        problems.append(f"step {number}: {name} refers to $step{ref}, "
+                                        "which isn't an earlier step")
+                        ok = False
+                        continue
+                    source = resolved[ref - 1] if ref - 1 < len(resolved) else None
+                    if source is None or source.output is None or source.kind is None:
+                        problems.append(
+                            f"step {number}: $step{ref} doesn't produce a file to use"
+                        )
+                        ok = False
+                        continue
+                    paths.append(source.output)
+                    field_kinds.append(source.kind)
+                    stem = stem or source.stem
+                else:
+                    path = find_input(value, cwd)
+                    if path is None:
+                        problems.append(f"step {number}: file {value!r} not found")
+                        ok = False
+                        continue
+                    paths.append(path)
+                    field_kinds.append(data_kind(path))
+                    stem = stem or path.stem
+            if not ok:
+                continue
+            many = isinstance(raw, list)
+            inputs[name] = paths if many else paths[0]
+            kinds[name] = field_kinds if many else field_kinds[0]
 
         if len(inputs) < sum(getattr(args, n, None) is not None for n in args.input_fields):
             resolved.append(ResolvedStep(number, args, inputs, None, None, False, stem or "out"))
@@ -97,7 +118,7 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
                 output = cwd / f"{new_stem}{args.output_ext(inputs['input'])}"
 
         if output is not None and not temporary:
-            if output in inputs.values():
+            if output in _flat_paths(inputs):
                 problems.append(f"step {number}: output {output.name} would overwrite its input")
             elif output in final_paths:
                 problems.append(f"step {number}: two steps write {output.name}")
@@ -112,6 +133,25 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
     if existing:
         raise PlanError(existing, retryable=False)
     return resolved
+
+
+def _texts(value: object) -> list[str]:
+    """File names or "$stepN" references stored in one input field."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+def _flat_paths(inputs: dict[str, Path | list[Path]]) -> list[Path]:
+    paths: list[Path] = []
+    for value in inputs.values():
+        if isinstance(value, list):
+            paths.extend(value)
+        else:
+            paths.append(value)
+    return paths
 
 
 def find_input(value: str, cwd: Path) -> Path | None:

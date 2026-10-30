@@ -25,6 +25,7 @@ from agis.planner import InvalidPlanOutput, Planner, compact_json
 from agis.sample_data import write_sample_data
 
 PATH_FIELDS = {"input", "mask", "other", "output"}
+PATH_LIST_FIELDS = {"others"}
 CRS_FIELDS = {"crs", "bbox_crs"}
 
 
@@ -173,6 +174,8 @@ def _same(key: str, got, want, data_dir: Path) -> bool:
             return False
         if not want:
             return True
+        if key in PATH_LIST_FIELDS:
+            return [_norm_path(str(item)) for item in got] == [_norm_path(w) for w in want]
         if isinstance(want[0], dict):
             return all(_same_dict(item, expected, data_dir) for item, expected in zip(got, want))
         if isinstance(want[0], str):

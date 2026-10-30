@@ -40,16 +40,17 @@ class OpArgs(BaseModel):
         if field is not None and field.default is not None:
             REGISTRY[field.default] = cls
 
-    def check(self, kinds: dict[str, Kind]) -> list[str]:
+    def check(self, kinds: dict[str, Kind | list[Kind]]) -> list[str]:
         """Problems with running this op on inputs of the given kinds."""
         problems = []
-        main = kinds.get("input")
-        if main is not None and main not in self.accepts:
-            allowed = " or ".join(sorted(self.accepts))
-            problems.append(f"{self.op} needs {allowed} input, got {main}")
+        for kind in _kind_list(kinds.get("input")):
+            if kind not in self.accepts:
+                allowed = " or ".join(sorted(self.accepts))
+                problems.append(f"{self.op} needs {allowed} input, got {kind}")
         for name in self.vector_fields:
-            if name in kinds and kinds[name] != "vector":
-                problems.append(f"{self.op} needs vector data for {name!r}, got {kinds[name]}")
+            bad = [kind for kind in _kind_list(kinds.get(name)) if kind != "vector"]
+            if bad:
+                problems.append(f"{self.op} needs vector data for {name!r}, got {bad[0]}")
         return problems
 
     def output_kind(self, input_kind: Kind) -> Kind | None:
@@ -64,5 +65,11 @@ class OpArgs(BaseModel):
         """Text appended to the input's name when auto-naming the output."""
         return getattr(self, "op", "out")
 
-    def run(self, inputs: dict[str, Path], output: Path | None) -> StepResult:
+    def run(self, inputs: dict[str, Path | list[Path]], output: Path | None) -> StepResult:
         raise NotImplementedError
+
+
+def _kind_list(kind: Kind | list[Kind] | None) -> list[Kind]:
+    if kind is None:
+        return []
+    return list(kind) if isinstance(kind, list) else [kind]

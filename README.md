@@ -60,6 +60,7 @@ Outputs are named after their inputs and steps (`roads_clipped_3857.gpkg`) unles
 | reproject (EPSG codes, common names like "web mercator", "utm", or "match county.shp") | vector, raster |
 | clip (to a mask layer or a bounding box) | vector, raster |
 | difference, union | vector |
+| merge (append features from other vector files; columns line up by name) | vector |
 | buffer (meters, kilometers, feet, miles; correct in any CRS) | vector |
 | dissolve (all, or by a field) | vector |
 | filter (keep rows by attribute: equals, comparisons, contains, in, null) | vector |
