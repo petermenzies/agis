@@ -128,7 +128,12 @@ def test_convert_kind_check():
 
 def test_info(data):
     result = Info(input="roads.gpkg").run({"input": data["roads"]}, None)
-    assert "EPSG:4326" in result.message and "lanes" in result.message
+    lines = result.message.splitlines()
+    assert lines[0] == "roads.gpkg"
+    assert "crs: EPSG:4326 (WGS 84)" in lines
+    assert "features: 4" in lines
+    assert "  lanes: int" in lines
+    assert "bounds:" in result.message
 
 
 @pytest.mark.parametrize("name", ["dem", "ortho"])

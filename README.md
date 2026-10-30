@@ -38,7 +38,7 @@ agis "make web map tiles from ortho.tif up to zoom 16"
 agis "what projection is dem.tif in?"
 ```
 
-`agis` on its own opens the prompt. Arrow keys move through the line you are typing, and up and down walk requests from this session and from earlier ones (`~/.config/agis/history`). Tab completes dataset names in the working folder. `exit` or Ctrl-D quits. A quoted request still runs once and exits.
+`agis` on its own opens the prompt. Arrow keys move through the line you are typing, and up and down walk requests from this session and from earlier ones (`~/.config/agis/history`). Tab completes dataset names in the working folder. `ls`, `cd`, and `pwd` run locally and are not sent to the model. `exit` or Ctrl-D quits. A quoted request still runs once and exits.
 
 agis reads the files in the current folder (CRS, geometry type, fields, raster bands) so the model knows what it's working with. It always shows the plan before running it.
 

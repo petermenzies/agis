@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+import shlex
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -92,9 +95,11 @@ def repl(
 
     session = _session(model, host, directory)
     options = Options(yes=yes, force=force, verbose=verbose)
-    prompt = _prompt_session(session.cwd)
+    completer = DatasetCompleter(session.cwd)
+    prompt = _prompt_session(completer)
     console.print(f"agis {__version__} using [bold]{session.backend.model}[/bold] in "
-                  f"{session.cwd}. Type a request, or 'exit' to quit.")
+                  f"{session.cwd}. Type a request, or 'exit' to quit. "
+                  "ls, cd, and pwd run locally.")
     while True:
         try:
             request = _read_request(prompt)
@@ -112,6 +117,8 @@ def repl(
         if request.lower() in ("exit", "quit", ":q"):
             return
         if not request:
+            continue
+        if try_builtin(request, session, completer, console):
             continue
         with _errors(exit_on_error=False):
             session.handle(request, options)
@@ -231,7 +238,7 @@ def _only_shared_flags(args: list[str]) -> bool:
     return True
 
 
-def _prompt_session(cwd: Path):
+def _prompt_session(completer: DatasetCompleter):
     """Line editor with history and file completion, or None when stdin is piped."""
     if not sys.stdin.isatty():
         return None
@@ -240,8 +247,69 @@ def _prompt_session(cwd: Path):
 
     path = config_mod.config_path().parent / "history"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return PromptSession(history=FileHistory(str(path)), completer=DatasetCompleter(cwd),
+    return PromptSession(history=FileHistory(str(path)), completer=completer,
                          complete_while_typing=False)
+
+
+_BUILTINS = {"ls", "cd", "pwd"}
+
+
+def try_builtin(line: str, session, completer: DatasetCompleter | None, console: Console) -> bool:
+    """Run ls, cd, or pwd locally. Anything else, including a pipe, returns False."""
+    if any(character in line for character in "|;&><"):
+        return False
+    try:
+        argv = shlex.split(line)
+    except ValueError:
+        return False
+    if not argv or argv[0] not in _BUILTINS:
+        return False
+    command, args = argv[0], argv[1:]
+    if command == "ls":
+        _ls(args, session, console)
+    elif command == "cd":
+        _cd(args, session, completer, console)
+    else:
+        _pwd(args, session, console)
+    return True
+
+
+def _ls(args: list[str], session, console: Console) -> None:
+    binary = shutil.which("ls")
+    if binary is None:
+        console.print("ls is not available on this system.", style="red")
+        return
+    # ls writes the listing itself. Its own message covers a bad path.
+    subprocess.run([binary, *args], cwd=session.cwd, check=False)
+
+
+def _cd(args: list[str], session, completer: DatasetCompleter | None, console: Console) -> None:
+    if len(args) > 1:
+        console.print("cd takes one directory.", style="red")
+        return
+    raw = args[0] if args else "~"
+    target = Path(raw).expanduser()
+    if not target.is_absolute():
+        target = session.cwd / target
+    try:
+        target = target.resolve()
+    except OSError as exc:
+        console.print(str(exc), style="red", markup=False)
+        return
+    if not target.is_dir():
+        console.print(f"not a directory: {raw}", style="red", markup=False)
+        return
+    session.cwd = target
+    if completer is not None:
+        completer.cwd = target
+    console.print(str(target), markup=False)
+
+
+def _pwd(args: list[str], session, console: Console) -> None:
+    if args:
+        console.print("pwd takes no arguments.", style="red")
+        return
+    console.print(str(session.cwd), markup=False)
 
 
 class DatasetCompleter(Completer):
