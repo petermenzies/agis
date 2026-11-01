@@ -31,7 +31,7 @@ def main() -> int:
         for step, result in zip(steps, results):
             print(f"{step.args.op}: {result.message}")
         assert (root / "roads_clipped_buffer50m_3857.gpkg").exists()
-        assert any((root / "ortho_tiles").rglob("*.png"))
+        assert (root / "ortho_tiles.mbtiles").read_bytes().startswith(b"SQLite format 3")
     assert plan_schema()["$defs"]
     print("smoke test passed")
     return 0

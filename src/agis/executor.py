@@ -14,7 +14,7 @@ from agis.ops.geoprocessing import Convert, Reproject
 from agis.ops.io import Kind, data_kind, is_dataset
 from agis.plan import Plan, step_ref
 
-TEMP_EXT: dict[Kind, str] = {"vector": ".gpkg", "raster": ".tif", "tiles": ""}
+TEMP_EXT: dict[Kind, str] = {"vector": ".gpkg", "raster": ".tif", "tiles": ".mbtiles"}
 SHAPEFILE_PARTS = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qix", ".sbn", ".sbx", ".shp.xml")
 
 

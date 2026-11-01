@@ -121,7 +121,7 @@ class Session:
             elif step.temporary:
                 output = "[dim](intermediate)[/dim]"
             else:
-                output = escape(self._rel(step.output) + ("/" if step.kind == "tiles" else ""))
+                output = escape(self._rel(step.output))
             table.add_row(str(step.number), step.args.op, escape(" ".join(details)), output)
         self.console.print(table)
 

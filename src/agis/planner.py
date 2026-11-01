@@ -68,13 +68,13 @@ EXAMPLES = [
     Example(
         files="- elevation.tif: raster, 1 band float32, 4000x3000 px, 10 metre pixels, EPSG:26910\n"
         "- city.geojson: vector, Polygon, 1 features, EPSG:4326, fields [name:str]",
-        request="clip elevation to the city and make web map tiles up to zoom 14",
+        request="clip elevation to the city and make an MBTiles file up to zoom 14",
         plan=Plan(
             steps=[
                 Clip(input="elevation.tif", mask="city.geojson"),
                 TileRaster(input="$step1", max_zoom=14),
             ],
-            message="Clip the elevation raster to the city, then tile it up to zoom 14.",
+            message="Clip the elevation raster to the city, then write an MBTiles file up to zoom 14.",
         ),
     ),
     Example(

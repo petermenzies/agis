@@ -110,8 +110,7 @@ def describe(path: Path, base: Path | None = None, detailed: bool = False) -> st
         if kind == "table":
             return f"{name}: {_describe_table(path)}"
         if kind == "tiles":
-            zooms = sorted(int(p.name) for p in path.iterdir() if p.name.isdigit())
-            return f"{name}: XYZ tile folder, zoom {zooms[0]}-{zooms[-1]}"
+            return f"{name}: {_tiles_compact(path)}"
     except Exception as exc:  # noqa: BLE001 - one unreadable file shouldn't break planning
         return f"{name}: unreadable ({exc})"
     return f"{name}: unsupported file"
@@ -152,8 +151,7 @@ def _describe_detailed(path: Path, name: str, kind: str | None) -> str:
         rows, fields = _table_fields(path)
         return _lines(name, [("kind", "table"), ("rows", str(rows))], fields)
     if kind == "tiles":
-        zooms = sorted(int(p.name) for p in path.iterdir() if p.name.isdigit())
-        return _lines(name, [("kind", "XYZ tiles"), ("zoom", f"{zooms[0]}-{zooms[-1]}")])
+        return _tiles_detailed(path, name)
     return f"{name}: unsupported file"
 
 
@@ -163,6 +161,47 @@ def _lines(name: str, items: list[tuple[str, str]], fields: list[str] | None = N
         lines.append("fields:")
         lines.extend(f"  {field}" for field in fields)
     return "\n".join(lines)
+
+
+def _tiles_compact(path: Path) -> str:
+    if path.suffix.lower() == ".mbtiles":
+        meta, _count = _read_mbtiles(path)
+        return (f"MBTiles {meta.get('format', 'png')}, "
+                f"zoom {meta.get('minzoom', '?')}-{meta.get('maxzoom', '?')}")
+    zooms = _xyz_zooms(path)
+    return f"XYZ tile folder, zoom {zooms[0]}-{zooms[-1]}"
+
+
+def _tiles_detailed(path: Path, name: str) -> str:
+    if path.suffix.lower() == ".mbtiles":
+        meta, count = _read_mbtiles(path)
+        items = [
+            ("kind", "mbtiles"),
+            ("format", meta.get("format", "png")),
+            ("zoom", f"{meta.get('minzoom', '?')}-{meta.get('maxzoom', '?')}"),
+            ("tiles", str(count)),
+        ]
+        if meta.get("bounds"):
+            items.append(("bounds", meta["bounds"]))
+        return _lines(name, items)
+    zooms = _xyz_zooms(path)
+    return _lines(name, [("kind", "XYZ tiles"), ("zoom", f"{zooms[0]}-{zooms[-1]}")])
+
+
+def _xyz_zooms(path: Path) -> list[int]:
+    return sorted(int(child.name) for child in path.iterdir() if child.name.isdigit())
+
+
+def _read_mbtiles(path: Path) -> tuple[dict[str, str], int]:
+    import sqlite3
+
+    con = sqlite3.connect(path)
+    try:
+        meta = dict(con.execute("select name, value from metadata"))
+        count = con.execute("select count(*) from tiles").fetchone()[0]
+        return meta, count
+    finally:
+        con.close()
 
 
 def _describe_vector(path: Path) -> str:

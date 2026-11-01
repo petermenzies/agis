@@ -34,6 +34,8 @@ def data_kind(path: Path) -> Kind | None:
     if path.is_dir():
         return "tiles" if any(p.is_dir() and p.name.isdigit() for p in path.iterdir()) else None
     ext = path.suffix.lower()
+    if ext == ".mbtiles":
+        return "tiles"
     if ext in VECTOR_DRIVERS or ext in VECTOR_READ_ONLY:
         return "vector"
     if ext in RASTER_EXTS:

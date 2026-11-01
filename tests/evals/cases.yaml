@@ -90,7 +90,7 @@
     - {op: convert, input: dem.tif, format: cog}
 
 - id: tile-zooms
-  prompt: make xyz tiles of the dem for zooms 10 through 13
+  prompt: make an mbtiles of the dem for zooms 10 through 13
   expect:
     - {op: tile_raster, input: dem.tif, min_zoom: 10, max_zoom: 13}
 
@@ -112,7 +112,7 @@
     - {op: difference, input: zones.gpkg, other: $step1, output: zones_no_parks.gpkg}
 
 - id: chain-clip-tile
-  prompt: clip the dem to the county and make web tiles up to zoom 13
+  prompt: clip the dem to the county and make an mbtiles up to zoom 13
   expect:
     - {op: clip, input: dem.tif, mask: county.shp}
     - {op: tile_raster, input: $step1, max_zoom: 13}

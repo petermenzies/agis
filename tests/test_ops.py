@@ -190,15 +190,45 @@ def test_info(data):
 
 @pytest.mark.parametrize("name", ["dem", "ortho"])
 def test_tile_raster(data, tmp_path, name):
-    out = tmp_path / f"{name}_tiles"
+    import sqlite3
+    import warnings
+
+    import morecantile
+    from rasterio.io import MemoryFile
+    from rasterio.warp import transform_bounds
+
+    out = tmp_path / f"{name}.mbtiles"
     result = TileRaster(input=f"{name}.tif", min_zoom=10, max_zoom=12).run(
         {"input": data[name]}, out
     )
-    pngs = list(out.rglob("*.png"))
-    assert pngs and result.kind == "tiles"
-    assert {p.parts[-3] for p in pngs} == {"10", "11", "12"}
+    assert out.is_file() and result.kind == "tiles"
+    con = sqlite3.connect(out)
+    meta = dict(con.execute("select name, value from metadata"))
+    stored = set(con.execute("select zoom_level, tile_column, tile_row from tiles"))
+    blob = con.execute("select tile_data from tiles limit 1").fetchone()[0]
+    con.close()
+    assert meta["format"] == "png"
+    assert meta["minzoom"] == "10" and meta["maxzoom"] == "12"
+    assert {z for z, _x, _y in stored} == {10, 11, 12}
+    assert blob.startswith(b"\x89PNG\r\n\x1a\n")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        with MemoryFile(blob) as mem, mem.open() as png:
+            assert (png.width, png.height, png.count) == (256, 256, 4)
+    with rasterio.open(data[name]) as src:
+        west, south, east, north = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+    north, south = min(north, 85.0511), max(south, -85.0511)
+    tms = morecantile.tms.get("WebMercatorQuad")
+    expected = {
+        (tile.z, tile.x, (1 << tile.z) - 1 - tile.y)
+        for tile in tms.tiles(west, south, east, north, zooms=[10, 11, 12])
+    }
+    assert stored <= expected
 
 
 def test_tile_raster_auto_zoom(data, tmp_path):
-    result = TileRaster(input="dem.tif").run({"input": data["dem"]}, tmp_path / "t")
-    assert "zoom" in result.message
+    out = tmp_path / "t.mbtiles"
+    result = TileRaster(input="dem.tif").run({"input": data["dem"]}, out)
+    assert out.is_file() and "zoom" in result.message
+    from agis.context import describe
+    assert describe(out).startswith("t.mbtiles: MBTiles png, zoom ")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sqlite3
 import warnings
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -10,6 +11,7 @@ import numpy as np
 import rasterio
 from pydantic import Field, model_validator
 from rasterio.errors import NotGeoreferencedWarning
+from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import Resampling, transform_bounds
@@ -30,11 +32,11 @@ class TileRaster(OpArgs):
     min_zoom: int | None = Field(None, description="Lowest zoom level. Null picks automatically.")
     max_zoom: int | None = Field(None, description="Highest zoom level. Null picks automatically.")
     output: str | None = Field(
-        None, description="Output folder name. Leave null unless the user names one."
+        None, description="Output .mbtiles file name. Leave null unless the user names one."
     )
 
     accepts: ClassVar = frozenset({"raster"})
-    summary: ClassVar = "Cut a raster into an XYZ folder of 256px PNG web map tiles."
+    summary: ClassVar = "Package a raster as an MBTiles file of 256px PNG web map tiles."
 
     @model_validator(mode="after")
     def _zoom_range(self):
@@ -49,7 +51,7 @@ class TileRaster(OpArgs):
         return "tiles"
 
     def output_ext(self, input_path: Path) -> str:
-        return ""
+        return ".mbtiles"
 
     def suffix(self) -> str:
         return "tiles"
@@ -70,14 +72,11 @@ class TileRaster(OpArgs):
             bands = [1, 2, 3] if src.count >= 3 else [1]
             scale = None if all(src.dtypes[b - 1] == "uint8" for b in bands) else _stats(src, bands)
 
-            written = 0
-            for tile in tiles:
-                if _write_tile(src, tile, bands, scale, output):
-                    written += 1
-        return StepResult(
-            output, "tiles",
-            f"wrote {written} tiles, zoom {minz}-{maxz}; URL template {output.name}/{{z}}/{{x}}/{{y}}.png",
-        )
+            written = _write_mbtiles(
+                src, tiles, bands, scale, output,
+                bounds=(west, south, east, north), min_zoom=minz, max_zoom=maxz,
+            )
+        return StepResult(output, "tiles", f"wrote {written} tiles, zoom {minz}-{maxz}")
 
     def _zooms(self, src) -> tuple[int, int]:
         maxz = self.max_zoom
@@ -107,7 +106,55 @@ def _stats(src, bands: list[int]) -> list[tuple[float, float]]:
     return out
 
 
-def _write_tile(src, tile, bands, scale, root: Path) -> bool:
+def _write_mbtiles(src, tiles, bands, scale, path: Path, bounds, min_zoom: int,
+                   max_zoom: int) -> int:
+    """Write PNG tiles into an MBTiles file. Tile rows use the TMS scheme the spec requires."""
+    west, south, east, north = bounds
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path)
+    written = 0
+    try:
+        con.execute("PRAGMA journal_mode=OFF")
+        con.executescript(
+            """
+            CREATE TABLE metadata (name text, value text);
+            CREATE TABLE tiles (
+                zoom_level integer, tile_column integer, tile_row integer, tile_data blob
+            );
+            CREATE UNIQUE INDEX tile_index ON tiles (zoom_level, tile_column, tile_row);
+            """
+        )
+        for tile in tiles:
+            blob = _render_tile(src, tile, bands, scale)
+            if blob is None:
+                continue
+            # morecantile counts y from the north; MBTiles counts tile_row from the south.
+            row = (1 << tile.z) - 1 - tile.y
+            con.execute(
+                "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) "
+                "VALUES (?, ?, ?, ?)",
+                (tile.z, tile.x, row, blob),
+            )
+            written += 1
+        center = f"{(west + east) / 2:.6f},{(south + north) / 2:.6f},{max_zoom}"
+        meta = {
+            "name": path.stem,
+            "format": "png",
+            "bounds": f"{west:.6f},{south:.6f},{east:.6f},{north:.6f}",
+            "center": center,
+            "minzoom": str(min_zoom),
+            "maxzoom": str(max_zoom),
+            "type": "overlay",
+            "version": "1",
+        }
+        con.executemany("INSERT INTO metadata (name, value) VALUES (?, ?)", meta.items())
+        con.commit()
+    finally:
+        con.close()
+    return written
+
+
+def _render_tile(src, tile, bands, scale) -> bytes | None:
     b = TMS.xy_bounds(tile)
     transform = from_bounds(b.left, b.bottom, b.right, b.top, TILE_SIZE, TILE_SIZE)
     with WarpedVRT(src, crs="EPSG:3857", transform=transform, width=TILE_SIZE,
@@ -115,7 +162,7 @@ def _write_tile(src, tile, bands, scale, root: Path) -> bool:
         data = vrt.read(bands, masked=True)
         alpha = vrt.dataset_mask()
     if not alpha.any():
-        return False
+        return None
 
     if scale is None:
         rgb = data.filled(0).astype("uint8")
@@ -127,12 +174,11 @@ def _write_tile(src, tile, bands, scale, root: Path) -> bool:
     if rgb.shape[0] == 1:
         rgb = np.repeat(rgb, 3, axis=0)
 
-    path = root / str(tile.z) / str(tile.x) / f"{tile.y}.png"
-    path.parent.mkdir(parents=True, exist_ok=True)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", NotGeoreferencedWarning)
-        with rasterio.open(path, "w", driver="PNG", width=TILE_SIZE, height=TILE_SIZE, count=4,
-                           dtype="uint8") as dst:
-            dst.write(rgb, [1, 2, 3])
-            dst.write(alpha.astype("uint8"), 4)
-    return True
+        with MemoryFile() as mem:
+            with mem.open(driver="PNG", width=TILE_SIZE, height=TILE_SIZE, count=4,
+                          dtype="uint8") as dst:
+                dst.write(rgb, [1, 2, 3])
+                dst.write(alpha.astype("uint8"), 4)
+            return mem.read()

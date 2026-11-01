@@ -34,7 +34,7 @@ If something isn't working, run `agis doctor` and include its output in bug repo
 agis                          # interactive prompt; later requests can say "now buffer that"
 agis "reproject parcels.shp to EPSG:2227"
 agis "buffer the streams by 30 m and remove that from parcels, save as buildable.gpkg"
-agis "make web map tiles from ortho.tif up to zoom 16"
+agis "make an MBTiles file from ortho.tif up to zoom 16"
 agis "what projection is dem.tif in?"
 ```
 
@@ -68,7 +68,7 @@ Outputs are named after their inputs and steps (`roads_clipped_3857.gpkg`) unles
 | join (attach a CSV, TSV, or another layer's columns on a shared field) | vector + table |
 | info | vector, raster, table |
 | convert (gpkg, shp, geojson, fgb, kml, tif, Cloud Optimized GeoTIFF) | vector, raster |
-| tile_raster (XYZ PNG tiles) | raster |
+| tile_raster (MBTiles of 256px PNG tiles) | raster |
 
 Requests that need anything else (slope, contours, and so on) get a short explanation instead of a guess.
 
