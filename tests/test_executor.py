@@ -37,13 +37,25 @@ def test_extension_is_optional(data, tmp_path):
     assert steps[0].inputs["input"].name == "zones.gpkg"
 
 
-def test_existing_output_is_not_retryable(data, tmp_path):
+def test_existing_output_gets_a_number(data, tmp_path):
     (tmp_path / "zones_dissolved.gpkg").write_text("x")
-    plan = Plan(steps=[Dissolve(input="zones.gpkg")])
-    with pytest.raises(PlanError) as exc:
-        resolve(plan, tmp_path, tmp_path / "w")
-    assert not exc.value.retryable
-    assert resolve(plan, tmp_path, tmp_path / "w", force=True)
+    (tmp_path / "zones_dissolved_2.gpkg").write_text("x")
+    steps = resolve(Plan(steps=[Dissolve(input="zones.gpkg")]), tmp_path, tmp_path / "w")
+    assert steps[0].output == (tmp_path / "zones_dissolved_3.gpkg").resolve()
+
+
+def test_named_output_gets_a_number(data, tmp_path):
+    (tmp_path / "custom.gpkg").write_text("x")
+    steps = resolve(Plan(steps=[Dissolve(input="zones.gpkg", output="custom.gpkg")]),
+                    tmp_path, tmp_path / "w")
+    assert steps[0].output == (tmp_path / "custom_2.gpkg").resolve()
+
+
+def test_force_overwrites_an_existing_output(data, tmp_path):
+    (tmp_path / "zones_dissolved.gpkg").write_text("x")
+    steps = resolve(Plan(steps=[Dissolve(input="zones.gpkg")]), tmp_path, tmp_path / "w",
+                    force=True)
+    assert steps[0].output == (tmp_path / "zones_dissolved.gpkg").resolve()
 
 
 def test_output_cannot_overwrite_input(data, tmp_path):

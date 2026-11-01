@@ -7,7 +7,7 @@ class PlanError(AgisError):
 
     def __init__(self, problems: list[str], retryable: bool = True):
         self.problems = problems
-        # False when asking the model again can't help, e.g. an output file already exists.
+        # False when asking the model again can't help.
         self.retryable = retryable
         super().__init__("; ".join(problems))
 

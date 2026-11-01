@@ -55,15 +55,10 @@ def detect_hardware() -> Hardware:
     return Hardware(chip=chip, memory_gb=memory_gb, apple_silicon=apple_silicon)
 
 
-def recommend_model(hw: Hardware) -> ModelChoice:
-    if not hw.apple_silicon:
-        return ModelChoice("qwen2.5-coder:3b", 1.9,
-                           "no Apple Silicon GPU, so the smallest model keeps CPU inference usable")
-    if hw.memory_gb < 12:
-        return ModelChoice("qwen2.5-coder:3b", 1.9, f"{hw.memory_gb:.0f} GB of memory")
-    if hw.memory_gb < 24:
-        return ModelChoice("qwen2.5-coder:7b", 4.7, f"{hw.memory_gb:.0f} GB of memory")
-    return ModelChoice("qwen2.5-coder:14b", 9.0, f"{hw.memory_gb:.0f} GB of memory")
+def recommend_model(_hw: Hardware) -> ModelChoice:
+    """The model setup offers. Hardware is still reported, but it doesn't change the choice."""
+    return ModelChoice(config_mod.DEFAULT_MODEL, 1.9,
+                       "best balance of speed and planning accuracy")
 
 
 def ollama_binary() -> str | None:

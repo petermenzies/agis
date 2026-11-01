@@ -130,7 +130,7 @@ def setup(
     host: HostOpt = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Accept the recommended model.")] = False,
 ):
-    """Check Ollama, pick a model that fits this Mac, download it, and save the choice."""
+    """Check Ollama, download the recommended model, and save the choice."""
     from agis.setup import run_setup
 
     with _errors():

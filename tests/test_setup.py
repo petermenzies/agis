@@ -4,14 +4,11 @@ from agis import config
 from agis.setup import Hardware, is_installed, recommend_model
 
 
-@pytest.mark.parametrize("memory,apple,expected", [
-    (8, True, "qwen2.5-coder:3b"),
-    (16, True, "qwen2.5-coder:7b"),
-    (36, True, "qwen2.5-coder:14b"),
-    (64, False, "qwen2.5-coder:3b"),
-])
-def test_recommend_model(memory, apple, expected):
-    assert recommend_model(Hardware("chip", memory, apple)).name == expected
+@pytest.mark.parametrize("memory,apple", [(8, True), (16, True), (36, True), (64, False)])
+def test_recommend_model(memory, apple):
+    choice = recommend_model(Hardware("chip", memory, apple))
+    assert choice.name == "qwen2.5:3b"
+    assert choice.download_gb == 1.9
 
 
 def test_is_installed_handles_latest_tag():

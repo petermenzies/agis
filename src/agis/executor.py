@@ -43,7 +43,6 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
         if (n := step_ref(value)) is not None
     }
     final_paths: set[Path] = set()
-    existing: list[str] = []
 
     if not plan.steps:
         raise PlanError([plan.message or "the plan has no steps"])
@@ -118,21 +117,32 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
                 output = cwd / f"{new_stem}{args.output_ext(inputs['input'])}"
 
         if output is not None and not temporary:
-            if output in _flat_paths(inputs):
+            inputs_paths = set(_flat_paths(inputs))
+            if output in inputs_paths:
                 problems.append(f"step {number}: output {output.name} would overwrite its input")
             elif output in final_paths:
                 problems.append(f"step {number}: two steps write {output.name}")
-            elif output.exists() and not force:
-                existing.append(f"{output.name} already exists (use --force to overwrite)")
+            elif not force:
+                output = _unused_name(output, reserved=final_paths | inputs_paths)
             final_paths.add(output)
 
         resolved.append(ResolvedStep(number, args, inputs, output, kind, temporary, new_stem))
 
     if problems:
         raise PlanError(problems)
-    if existing:
-        raise PlanError(existing, retryable=False)
     return resolved
+
+
+def _unused_name(path: Path, reserved: set[Path]) -> Path:
+    """Keep path when it is free. Otherwise append _2, _3, ... before the extension."""
+    if path not in reserved and not path.exists():
+        return path
+    n = 2
+    while True:
+        candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        if candidate not in reserved and not candidate.exists():
+            return candidate
+        n += 1
 
 
 def _texts(value: object) -> list[str]:
