@@ -18,7 +18,7 @@ You need a Mac with Apple Silicon and at least 8 GB of memory (16 GB recommended
 
 ```bash
 brew install uv ollama        # or: curl -LsSf https://astral.sh/uv/install.sh | sh, and the Ollama app from ollama.com
-uv tool install agis          # or: pipx install agis
+uv tool install agis-spatial   # or: pipx install agis-spatial
 agis setup
 ```
 

@@ -44,7 +44,7 @@ jobs:
       - run: agis --help
       - name: Smoke test with the tool's own Python
         run: |
-          TOOL_PY="$(uv tool dir)/agis/bin/python"
+          TOOL_PY="$(uv tool dir)/agis-spatial/bin/python"
           "$TOOL_PY" scripts/smoke_test.py
       - name: doctor runs (Ollama is absent on CI, so a failing exit is expected)
         run: agis doctor || true

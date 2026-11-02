@@ -1,6 +1,6 @@
 """Post-install check that the geospatial stack works without any system GDAL.
 
-Run with the Python from a fresh install, e.g. the one `uv tool install agis` created.
+Run with the Python from a fresh install, e.g. the one `uv tool install agis-spatial` created.
 It doesn't need Ollama: it exercises the operations directly.
 """
 

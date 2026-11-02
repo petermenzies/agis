@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      # PyPI trusted publishing; configure the publisher at pypi.org/manage/project/agis.
+      # PyPI trusted publishing; configure the publisher at pypi.org/manage/project/agis-spatial.
       id-token: write
     steps:
       - uses: actions/checkout@v4
