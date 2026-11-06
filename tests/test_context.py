@@ -1,9 +1,19 @@
+import geopandas as gpd
 import pyogrio
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
+from shapely.geometry import Point
 
 from agis.cli import DatasetCompleter
-from agis.context import MAX_DESCRIBED, MAX_LISTED, build_context, cached_describe, describe
+from agis.context import (
+    MAX_DESCRIBED,
+    MAX_LISTED,
+    _peek_geojson,
+    build_context,
+    cached_describe,
+    describe,
+)
+from agis.ops.io import read_vector
 
 
 def test_named_file_is_described_and_the_rest_are_listed(data, tmp_path):
@@ -77,6 +87,66 @@ def test_summary_cache_reuses_an_unchanged_file_and_rereads_a_changed_one(data, 
     path.touch()
     cached_describe(path, cache=cache)
     assert calls["n"] == 2
+
+
+def test_geometry_only_gpkg_reports_its_fid(tmp_path):
+    path = tmp_path / "only.gpkg"
+    gpd.GeoDataFrame(geometry=[Point(0, 0)], crs="EPSG:4326").to_file(path)
+    detailed = describe(path, detailed=True)
+    summary = describe(path)
+    assert "fid: int" in detailed
+    assert "fid:int" in summary
+
+
+def test_geojson_peek_reads_the_first_feature_and_not_its_coordinates(tmp_path, monkeypatch):
+    path = tmp_path / "land.geojson"
+    path.write_text(
+        '{"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:4326"}},'
+        '"features":[{"type":"Feature","properties":{"name":"Park","beds":4,"open":true},'
+        '"geometry":{"type":"Polygon","coordinates":['
+    )
+    info = _peek_geojson(path)
+    assert info["geometry_type"] == "Polygon"
+    assert info["fields"] == ["name", "beds", "open"]
+    assert info["dtypes"] == ["str", "int", "bool"]
+    assert info["crs"] == "EPSG:4326"
+    assert info["features"] is None
+
+    def too_large(*_args, **_kwargs):
+        raise RuntimeError(
+            "GeoJSON object too complex/large. Define OGR_GEOJSON_MAX_OBJ_SIZE to allow it."
+        )
+
+    # The file is not valid GeoJSON past the first type, so the fallback must not parse it.
+    monkeypatch.setattr("agis.context.pyogrio.read_info", too_large)
+    text = describe(path, detailed=True)
+    assert "features: not read" in text
+    assert "bounds: not read" in text
+    assert "name: str" in text and "beds: int" in text and "open: bool" in text
+    assert "EPSG:4326" in text
+
+
+def test_geojson_read_lifts_the_size_limit_and_restores_it(tmp_path, monkeypatch):
+    path = tmp_path / "a.geojson"
+    path.write_text('{"type":"FeatureCollection","features":[]}')
+    seen = {}
+
+    def get_option(name):
+        assert name == "OGR_GEOJSON_MAX_OBJ_SIZE"
+        return "200"
+
+    def set_options(options):
+        seen.update(options)
+
+    def read_file(_path):
+        assert seen["OGR_GEOJSON_MAX_OBJ_SIZE"] == "0"
+        return "frame"
+
+    monkeypatch.setattr("agis.ops.io.pyogrio.get_gdal_config_option", get_option)
+    monkeypatch.setattr("agis.ops.io.pyogrio.set_gdal_config_options", set_options)
+    monkeypatch.setattr("agis.ops.io.gpd.read_file", read_file)
+    assert read_vector(path) == "frame"
+    assert seen["OGR_GEOJSON_MAX_OBJ_SIZE"] == "200"
 
 
 def test_tab_completes_dataset_names_and_skips_sidecars(data, tmp_path):

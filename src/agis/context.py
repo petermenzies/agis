@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 import pyogrio
 import rasterio
 from pyproj import CRS
+from pyproj.exceptions import CRSError
 
 from agis.crs import crs_label
 from agis.ops.io import SIDECAR_EXTS, data_kind, is_dataset
@@ -119,19 +121,17 @@ def describe(path: Path, base: Path | None = None, detailed: bool = False) -> st
 def _describe_detailed(path: Path, name: str, kind: str | None) -> str:
     """One fact per line, for the info command. The planning summary stays a single line."""
     if kind == "vector":
-        info = pyogrio.read_info(path, force_total_bounds=True)
-        crs = CRS.from_user_input(info["crs"]) if info.get("crs") else None
+        info = _load_vector_info(path, force_total_bounds=True)
         items = [
             ("kind", "vector"),
-            ("geometry", str(info["geometry_type"])),
-            ("features", str(info["features"])),
-            ("crs", crs_label(crs)),
-            ("bounds", _bounds(info.get("total_bounds"))),
+            ("geometry", str(info["geometry_type"] or "unknown")),
+            ("features", "not read" if info["partial"] else str(info["features"])),
+            ("crs", _crs_text(info)),
+            ("bounds", "not read" if info["partial"] else _bounds(info.get("total_bounds"))),
         ]
         if info.get("layer_name"):
             items.append(("layer", str(info["layer_name"])))
-        fields = [f"{n}: {_short_dtype(t)}" for n, t in zip(info["fields"], info["dtypes"])]
-        return _lines(name, items, fields)
+        return _lines(name, items, _attribute_fields(info, spaced=True))
     if kind == "raster":
         with rasterio.open(path) as src:
             crs = CRS.from_user_input(src.crs) if src.crs else None
@@ -158,8 +158,11 @@ def _describe_detailed(path: Path, name: str, kind: str | None) -> str:
 def _lines(name: str, items: list[tuple[str, str]], fields: list[str] | None = None) -> str:
     lines = [name, *[f"{label}: {value}" for label, value in items]]
     if fields is not None:
-        lines.append("fields:")
-        lines.extend(f"  {field}" for field in fields)
+        if fields:
+            lines.append("fields:")
+            lines.extend(f"  {field}" for field in fields)
+        else:
+            lines.append("fields: none")
     return "\n".join(lines)
 
 
@@ -207,13 +210,158 @@ def _read_mbtiles(path: Path) -> tuple[dict[str, str], int]:
 def _describe_vector(path: Path) -> str:
     # Header metadata is enough for planning. Scanning every feature for bounds is reserved
     # for `info`, which asks for the detailed summary.
-    info = pyogrio.read_info(path, force_total_bounds=False)
-    crs = CRS.from_user_input(info["crs"]) if info.get("crs") else None
-    fields = [f"{n}:{_short_dtype(t)}" for n, t in zip(info["fields"], info["dtypes"])]
+    info = _load_vector_info(path, force_total_bounds=False)
+    fields = _attribute_fields(info, spaced=False)
     shown = fields[:MAX_FIELDS]
-    more = "" if len(shown) == len(fields) else f", +{len(fields) - len(shown)} more"
-    return (f"vector, {info['geometry_type']}, {info['features']} features, {crs_label(crs)}, "
-            f"fields [{', '.join(shown)}{more}]")
+    if not fields:
+        field_text = "none"
+    else:
+        more = "" if len(shown) == len(fields) else f", +{len(fields) - len(shown)} more"
+        field_text = ", ".join(shown) + more
+    count = "features not read" if info["partial"] else f"{info['features']} features"
+    return (f"vector, {info['geometry_type'] or 'unknown'}, {count}, {_crs_text(info)}, "
+            f"fields [{field_text}]")
+
+
+def _load_vector_info(path: Path, force_total_bounds: bool) -> dict:
+    try:
+        info = pyogrio.read_info(path, force_total_bounds=force_total_bounds)
+    except Exception as exc:
+        if not _geojson_too_large(path, exc):
+            raise
+        info = _peek_geojson(path)
+        info["partial"] = True
+        return info
+    info["partial"] = False
+    return info
+
+
+def _geojson_too_large(path: Path, exc: Exception) -> bool:
+    if path.suffix.lower() not in {".geojson", ".json"}:
+        return False
+    text = str(exc)
+    return "OGR_GEOJSON_MAX_OBJ_SIZE" in text or "too complex/large" in text
+
+
+def _attribute_fields(info: dict, spaced: bool) -> list[str]:
+    """Attribute columns plus the feature id, which pyogrio reports separately."""
+    sep = ": " if spaced else ":"
+    raw_fields = info.get("fields")
+    raw_dtypes = info.get("dtypes")
+    names = [] if raw_fields is None else [str(name) for name in raw_fields]
+    dtypes = [] if raw_dtypes is None else [str(dtype) for dtype in raw_dtypes]
+    fields = [f"{name}{sep}{_short_dtype(dtype)}" for name, dtype in zip(names, dtypes)]
+    fid = info.get("fid_column")
+    if fid is not None and str(fid) not in names:
+        fields.insert(0, f"{fid}{sep}int")
+    return fields
+
+
+def _crs_text(info: dict) -> str:
+    raw = info.get("crs")
+    if not raw:
+        return "not in header" if info.get("partial") else crs_label(None)
+    try:
+        return crs_label(CRS.from_user_input(raw))
+    except CRSError:
+        return str(raw)
+
+
+_GEOM_TYPES = (
+    "Point", "LineString", "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon",
+    "GeometryCollection",
+)
+_GEOM_TYPE = re.compile(r'"type"\s*:\s*"(' + "|".join(_GEOM_TYPES) + ')"')
+
+
+def _peek_geojson(path: Path) -> dict:
+    """CRS, geometry type, and first-feature fields, without reading coordinates."""
+    decoder = json.JSONDecoder()
+    buf = ""
+    info = _empty_peek()
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        while len(buf) < 8_000_000:
+            block = handle.read(65536)
+            if not block:
+                break
+            buf += block
+            info, done = _parse_geojson_prefix(buf, decoder)
+            if done:
+                break
+    return info
+
+
+def _empty_peek() -> dict:
+    return {
+        "geometry_type": None, "features": None, "crs": None, "total_bounds": None,
+        "layer_name": None, "fields": [], "dtypes": [], "fid_column": None,
+    }
+
+
+def _parse_geojson_prefix(text: str, decoder: json.JSONDecoder) -> tuple[dict, bool]:
+    info = _empty_peek()
+    feature = re.search(r'"type"\s*:\s*"Feature"', text)
+    if feature is None:
+        return info, False
+    crs_at = _json_key_at(text, "crs", 0, feature.start())
+    if crs_at is not None:
+        try:
+            obj, _end = decoder.raw_decode(text, crs_at)
+        except json.JSONDecodeError:
+            obj = None
+        name = _crs_name(obj)
+        if name:
+            info["crs"] = name
+    props_at = _json_key_at(text, "properties", feature.end(), len(text))
+    if props_at is None:
+        return info, False
+    try:
+        value, end = decoder.raw_decode(text, props_at)
+    except json.JSONDecodeError:
+        return info, False
+    if isinstance(value, dict):
+        info["fields"] = list(value)
+        info["dtypes"] = [_json_type(item) for item in value.values()]
+    geom = _GEOM_TYPE.search(text, end)
+    if geom is None:
+        return info, False
+    info["geometry_type"] = geom.group(1)
+    return info, True
+
+
+def _json_key_at(text: str, key: str, start: int, end: int) -> int | None:
+    """Index of the JSON value for key, searching only within text[start:end]."""
+    window = text[start:end]
+    match = re.search(rf'"{re.escape(key)}"\s*:', window)
+    if match is None:
+        return None
+    value_at = start + match.end()
+    while value_at < len(text) and text[value_at].isspace():
+        value_at += 1
+    return value_at
+
+
+def _crs_name(value) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value
+    if not isinstance(value, dict):
+        return None
+    props = value.get("properties")
+    if isinstance(props, dict) and props.get("name"):
+        return str(props["name"])
+    if value.get("name"):
+        return str(value["name"])
+    return None
+
+
+def _json_type(value) -> str:
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    return "str"
 
 
 def _describe_table(path: Path) -> str:

@@ -72,7 +72,16 @@ def read_table(path: Path) -> pd.DataFrame:
 
 
 def read_vector(path: Path) -> gpd.GeoDataFrame:
-    return gpd.read_file(path)
+    if path.suffix.lower() not in {".geojson", ".json"}:
+        return gpd.read_file(path)
+    # A FeatureCollection is one JSON object, so GDAL's default size cap rejects large
+    # files before any features are read. Lift it only for this read.
+    previous = pyogrio.get_gdal_config_option("OGR_GEOJSON_MAX_OBJ_SIZE")
+    pyogrio.set_gdal_config_options({"OGR_GEOJSON_MAX_OBJ_SIZE": "0"})
+    try:
+        return gpd.read_file(path)
+    finally:
+        pyogrio.set_gdal_config_options({"OGR_GEOJSON_MAX_OBJ_SIZE": previous})
 
 
 def write_vector(gdf: gpd.GeoDataFrame, path: Path) -> None:
