@@ -106,16 +106,18 @@ class Session:
         if plan.message:
             self.console.print(plan.message, style="bold", markup=False)
         table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2, 0, 0))
-        table.add_column("#", justify="right")
-        table.add_column("operation")
-        table.add_column("details")
-        table.add_column("output")
+        table.add_column("#", justify="right", no_wrap=True)
+        table.add_column("operation", no_wrap=True)
+        # Fold instead of ellipsis so a narrow terminal wraps the arguments
+        # rather than hiding the rest of the step.
+        table.add_column("details", overflow="fold", ratio=1)
+        table.add_column("output", overflow="fold")
         for step in steps:
             details = []
             for name, value in step.args.model_dump(exclude={"op", "output"}).items():
                 default = type(step.args).model_fields[name].default
                 if value is not None and (value != default or name in step.args.input_fields):
-                    details.append(f"{name}={_short(value)}")
+                    details.append(f"{name}={_detail(name, value)}")
             if step.output is None:
                 output = "[dim]-[/dim]"
             elif step.temporary:
@@ -162,6 +164,18 @@ class Session:
             return str(path)
 
 
-def _short(value) -> str:
-    text = str(value)
-    return text if len(text) <= 40 else text[:37] + "..."
+def _detail(name: str, value) -> str:
+    """How one argument is shown in the plan preview."""
+    if name == "where":
+        clauses = [_condition(item) for item in value]
+        return str(clauses[0] if len(clauses) == 1 else clauses)
+    return str(value)
+
+
+def _condition(item: dict) -> list:
+    """A filter test as [field, op, value], dropping a null value."""
+    clause = [item["field"], item["op"]]
+    if item.get("value") is not None:
+        clause.append(item["value"])
+    return clause
+
