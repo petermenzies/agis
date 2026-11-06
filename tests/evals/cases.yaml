@@ -145,6 +145,46 @@
   expect:
     - {op: join, input: zones.gpkg, table: zone_stats.csv}
 
+- id: filter-is
+  prompt: keep roads where the name is Market St
+  expect:
+    - op: filter
+      input: roads.gpkg
+      where:
+        - {field: name, op: "==", value: Market St}
+
+- id: filter-is-not
+  prompt: roads where the name is not Market St
+  expect:
+    - op: filter
+      input: roads.gpkg
+      where:
+        - {field: name, op: "!=", value: Market St}
+
+- id: filter-at-least
+  prompt: roads with at least 6 lanes
+  expect:
+    - op: filter
+      input: roads.gpkg
+      where:
+        - {field: lanes, op: ">=", value: "6"}
+
+- id: filter-either
+  prompt: zones that are residential or commercial
+  expect:
+    - op: filter
+      input: zones.gpkg
+      where:
+        - {field: zone, op: in, value: "residential,commercial"}
+
+- id: filter-filled
+  prompt: parks where the name is filled in
+  expect:
+    - op: filter
+      input: parks.geojson
+      where:
+        - {field: name, op: not_null}
+
 - id: filter-then-select
   prompt: from zones keep the residential ones and only the zone column, save as residential.gpkg
   expect:

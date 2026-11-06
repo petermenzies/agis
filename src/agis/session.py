@@ -9,7 +9,6 @@ from pathlib import Path
 from rich.console import Console
 from rich.markup import escape
 from rich.prompt import Confirm
-from rich.table import Table
 
 from agis.context import build_context
 from agis.errors import AgisError, PlanError, StepError
@@ -105,27 +104,26 @@ class Session:
     def preview(self, plan: Plan, steps: list[ResolvedStep]) -> None:
         if plan.message:
             self.console.print(plan.message, style="bold", markup=False)
-        table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2, 0, 0))
-        table.add_column("#", justify="right", no_wrap=True)
-        table.add_column("operation", no_wrap=True)
-        # Fold instead of ellipsis so a narrow terminal wraps the arguments
-        # rather than hiding the rest of the step.
-        table.add_column("details", overflow="fold", ratio=1)
-        table.add_column("output", overflow="fold")
         for step in steps:
-            details = []
+            shown = []
             for name, value in step.args.model_dump(exclude={"op", "output"}).items():
                 default = type(step.args).model_fields[name].default
                 if value is not None and (value != default or name in step.args.input_fields):
-                    details.append(f"{name}={_detail(name, value)}")
+                    shown.append((name, _detail(name, value)))
             if step.output is None:
                 output = "[dim]-[/dim]"
             elif step.temporary:
                 output = "[dim](intermediate)[/dim]"
             else:
                 output = escape(self._rel(step.output))
-            table.add_row(str(step.number), step.args.op, escape(" ".join(details)), output)
-        self.console.print(table)
+            self.console.print(f"{step.number}  op: {escape(step.args.op)}")
+            inputs = [f"{name}: {value}" for name, value in shown if name == "input"]
+            details = [f"{name}={value}" for name, value in shown if name != "input"]
+            for line in inputs:
+                self.console.print(f"   {escape(line)}")
+            if details:
+                self.console.print(f"   details: {escape(' '.join(details))}")
+            self.console.print(f"   output: {output}")
 
     def _confirm(self, steps: list[ResolvedStep], options: Options) -> bool:
         if options.yes or all(isinstance(s.args, Info) for s in steps):

@@ -26,8 +26,9 @@ Rules:
 - Use file names exactly as they appear in the Files list.
 - To use the result of an earlier step, set the file argument (input, mask, other, or any \
 other) to "$stepN", where N is the 1-based position of that step.
-- For attribute queries use filter, and use one step even when there are several tests: match \
-"all" means and, "any" means or. Use select to keep columns. Don't reproject for these.
+- For attribute queries use one filter even when there are several tests: match "all" means \
+and, "any" means or. Do not add a select unless the user asks to keep columns. Don't reproject \
+for these.
 - Use join to attach a CSV or another layer's attributes to a vector layer. Leave left_on and \
 right_on empty when the files share one column name.
 - Use merge to append the rows of vector files into one layer. The first file is input; every \
@@ -94,6 +95,44 @@ EXAMPLES = [
                 Select(input="$step1", columns=["apn", "zoning"], output="residential.gpkg"),
             ],
             message="Keep residential parcels over 1 acre, with the apn and zoning columns.",
+        ),
+    ),
+    Example(
+        files="- shapes.fgb: vector, Polygon, 40 features, EPSG:4326, "
+        "fields [country_of_residence:str, sector:str, beds:int]",
+        request="filter shapes.fgb where the country of residence is Spain",
+        plan=Plan(
+            steps=[Filter(input="shapes.fgb", where=[
+                Condition(field="country_of_residence", op="==", value="Spain"),
+            ])],
+            message="Keep shapes whose country of residence is Spain.",
+        ),
+    ),
+    Example(
+        files="- shapes.fgb: vector, Polygon, 40 features, EPSG:4326, "
+        "fields [country_of_residence:str, sector:str, beds:int]",
+        request="shapes where the country of residence is not Spain, or there are at least 10 beds",
+        plan=Plan(
+            steps=[Filter(
+                input="shapes.fgb",
+                match="any",
+                where=[
+                    Condition(field="country_of_residence", op="!=", value="Spain"),
+                    Condition(field="beds", op=">=", value="10"),
+                ],
+            )],
+            message="Keep shapes that are outside Spain, or that have at least 10 beds.",
+        ),
+    ),
+    Example(
+        files="- shapes.fgb: vector, Polygon, 40 features, EPSG:4326, "
+        "fields [country_of_residence:str, sector:str, beds:int, name:str]",
+        request="where country of residence is filled in",
+        plan=Plan(
+            steps=[Filter(input="shapes.fgb", where=[
+                Condition(field="country_of_residence", op="not_null"),
+            ])],
+            message="Keep shapes that have a country of residence.",
         ),
     ),
     Example(

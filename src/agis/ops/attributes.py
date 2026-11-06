@@ -30,7 +30,14 @@ class Condition(BaseModel):
 
     @model_validator(mode="after")
     def _value_required(self):
-        if self.op not in ("is_null", "not_null") and not (self.value and self.value.strip()):
+        if self.op in ("is_null", "not_null"):
+            if self.value and self.value.strip():
+                raise ValueError(
+                    f"{self.op} takes no value; use == or != to compare {self.field} to "
+                    f"{self.value!r}"
+                )
+            return self
+        if not (self.value and self.value.strip()):
             raise ValueError(f"{self.op} needs a value")
         return self
 
@@ -40,12 +47,19 @@ class Filter(OpArgs):
     input: str = Field(description=INPUT_DESC)
     where: list[Condition] = Field(
         min_length=1,
-        description="Conditions, each with field, op and value. op is one of ==, !=, >, >=, "
-        "<, <=, contains, in, is_null, not_null. value is text; for in, separate values with "
-        "commas. Leave value null for is_null and not_null.",
+        description="Attribute tests. A named value uses ==, !=, >, >=, <, <=, contains, or in. "
+        "'is X' and 'equals X' are ==. 'is not X' and 'exclude X' are !=. "
+        "'at least' and 'N or more' are >=; 'more than' and 'over' are >; 'fewer than' is <. "
+        "For in, separate values with commas. "
+        "is_null means that named field is missing, blank, or has no value. "
+        "not_null means that named field is filled in or present. "
+        "is_null and not_null take no value, and they apply only to the field the user named. "
+        "Never use them when the request names a value.",
     )
     match: Literal["all", "any"] = Field(
-        "all", description='"all" keeps rows matching every condition; "any" keeps rows matching one.'
+        "all",
+        description='"all" (and) keeps rows matching every condition; "any" (or) keeps rows '
+        "matching one.",
     )
     output: str | None = Field(None, description=OUTPUT_DESC)
 

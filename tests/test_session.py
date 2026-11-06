@@ -22,16 +22,17 @@ def test_preview_shows_full_operation_details(tmp_path):
     )
     plan = Plan(steps=[args], message="Keep the planned roads.")
     narrow = _preview(plan, step, tmp_path, width=60)
-    assert "ped.gpkg" in narrow
-    assert "exceeds the old" in narrow
+    assert filename in "".join(narrow.split())
     assert "..." not in narrow
     assert "…" not in narrow
 
     wide = _preview(plan, step, tmp_path, width=400)
-    assert filename in wide
-    assert f"['status', '==', '{status}']" in wide
+    lines = [line.strip() for line in wide.splitlines() if line.strip()]
+    assert "1  op: filter" in lines
+    assert f"input: {filename}" in lines
+    assert f"details: where=['status', '==', '{status}']" in lines
+    assert f"output: {output.name}" in lines
     assert "'field':" not in wide
-    assert output.name in wide
 
 
 def test_filter_where_reads_as_a_condition():

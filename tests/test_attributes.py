@@ -73,6 +73,12 @@ def test_filter_rejects_a_missing_value():
         Condition(field="lanes", op=">=")
 
 
+def test_filter_rejects_a_value_on_a_null_check():
+    with pytest.raises(ValueError, match="use == or !="):
+        Condition(field="country_of_residence", op="not_null", value="Spain")
+    Condition(field="country_of_residence", op="is_null")
+
+
 def test_select_keeps_geometry_and_drops_the_rest(data, tmp_path):
     out = tmp_path / "names.geojson"
     result = Select(input="parks.geojson", columns=["name", "geometry"]).run(
