@@ -27,6 +27,8 @@ class ResolvedStep:
     kind: Kind | None
     temporary: bool
     stem: str
+    # Extension the output represents. A temporary vector file is .gpkg on disk.
+    ext: str | None = None
 
 
 def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[ResolvedStep]:
@@ -51,6 +53,7 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
         inputs: dict[str, Path | list[Path]] = {}
         kinds: dict[str, Kind | list[Kind]] = {}
         stem = None
+        format_path: Path | None = None
         for name in args.input_fields:
             raw = getattr(args, name, None)
             if raw is None:
@@ -80,6 +83,8 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
                     paths.append(source.output)
                     field_kinds.append(source.kind)
                     stem = stem or source.stem
+                    if name == "input" and format_path is None:
+                        format_path = _format_source(source)
                 else:
                     path = find_input(value, cwd)
                     if path is None:
@@ -89,6 +94,8 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
                     paths.append(path)
                     field_kinds.append(data_kind(path))
                     stem = stem or path.stem
+                    if name == "input" and format_path is None:
+                        format_path = path
             if not ok:
                 continue
             many = isinstance(raw, list)
@@ -105,16 +112,20 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
         kind = args.output_kind(kinds["input"]) if "input" in kinds else None
         suffix = args.suffix()
         new_stem = f"{stem}_{suffix}" if suffix else stem
-        output, temporary = None, False
+        output, temporary, logical = None, False, None
         if kind is not None:
+            source_path = format_path if format_path is not None else inputs["input"]
+            logical = args.output_ext(source_path)
             if args.output:
                 output = _absolute(Path(args.output).expanduser(), cwd)
+                if output.suffix:
+                    logical = output.suffix.lower()
             elif number in referenced:
-                ext = TEMP_EXT[kind] if not isinstance(args, Convert) else args.output_ext(
-                    inputs["input"])
-                output, temporary = workdir / f"step{number}_{new_stem}{ext}", True
+                # Keep a temp vector as GeoPackage. Convert writes its target format.
+                disk = TEMP_EXT[kind] if not isinstance(args, Convert) else logical
+                output, temporary = workdir / f"step{number}_{new_stem}{disk}", True
             else:
-                output = cwd / f"{new_stem}{args.output_ext(inputs['input'])}"
+                output = cwd / f"{new_stem}{logical}"
 
         if output is not None and not temporary:
             inputs_paths = set(_flat_paths(inputs))
@@ -126,11 +137,19 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
                 output = _unused_name(output, reserved=final_paths | inputs_paths)
             final_paths.add(output)
 
-        resolved.append(ResolvedStep(number, args, inputs, output, kind, temporary, new_stem))
+        resolved.append(ResolvedStep(
+            number, args, inputs, output, kind, temporary, new_stem, logical))
 
     if problems:
         raise PlanError(problems)
     return resolved
+
+
+def _format_source(source: ResolvedStep) -> Path:
+    """A path whose suffix is the format this step represents, not its temp file."""
+    if source.ext:
+        return Path(f"step{source.number}{source.ext}")
+    return source.output
 
 
 def _unused_name(path: Path, reserved: set[Path]) -> Path:

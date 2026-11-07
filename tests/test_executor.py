@@ -7,7 +7,7 @@ from rich.console import Console
 from agis.crs import resolve_crs
 from agis.errors import PlanError, StepError
 from agis.executor import resolve, run
-from agis.ops.geoprocessing import Buffer, Clip, Difference, Dissolve, Reproject
+from agis.ops.geoprocessing import Buffer, Clip, Convert, Difference, Dissolve, Reproject
 from agis.ops.merge import Merge
 from agis.plan import Plan, plan_schema
 from agis.session import Options, Session
@@ -22,6 +22,30 @@ def test_chain_uses_intermediate_and_lineage_name(data, tmp_path):
     assert steps[1].output == (tmp_path / "roads_clipped_3857.gpkg").resolve()
     run(steps)
     assert gpd.read_file(steps[1].output).crs.to_epsg() == 3857
+
+
+def test_chain_keeps_the_input_format(data, tmp_path):
+    plan = Plan(steps=[Dissolve(input="parks.geojson"),
+                       Buffer(input="$step1", distance=10)])
+    work = tmp_path / "work"
+    steps = resolve(plan, tmp_path, work)
+    assert steps[0].temporary and steps[0].output.suffix == ".gpkg"
+    assert steps[1].output == (tmp_path / "parks_dissolved_buffer10m.geojson").resolve()
+
+
+def test_chain_keeps_a_converted_format(data, tmp_path):
+    plan = Plan(steps=[Convert(input="zones.gpkg", format="geojson"),
+                       Dissolve(input="$step1")])
+    steps = resolve(plan, tmp_path, tmp_path / "w")
+    assert steps[0].output.suffix == ".geojson"
+    assert steps[1].output == (tmp_path / "zones_dissolved.geojson").resolve()
+
+
+def test_named_output_keeps_its_extension(data, tmp_path):
+    plan = Plan(steps=[Dissolve(input="parks.geojson"),
+                       Buffer(input="$step1", distance=10, output="kept.gpkg")])
+    steps = resolve(plan, tmp_path, tmp_path / "w")
+    assert steps[1].output == (tmp_path / "kept.gpkg").resolve()
 
 
 def test_missing_file_and_bad_ref_reported_together(data, tmp_path):

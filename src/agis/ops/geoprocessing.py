@@ -17,7 +17,10 @@ from agis.ops.base import OpArgs, StepResult
 from agis.ops.io import Kind, read_vector, require_kind, vector_mask, write_vector
 
 INPUT_DESC = 'Input file name, or "$stepN" to use the output of step N.'
-OUTPUT_DESC = "Output file name. Leave null unless the user names one."
+OUTPUT_DESC = (
+    "Output file name. Leave null unless the user names one. If they do, use the "
+    "extension they gave; do not change the input's format."
+)
 
 
 def _ref_stem(value: str | None, fallback: str) -> str:

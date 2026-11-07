@@ -34,8 +34,9 @@ right_on empty when the files share one column name.
 - Use merge to append the rows of vector files into one layer. The first file is input; every \
 other file goes in others, in the order given. Columns line up by name. Use dissolve only when \
 geometries should be combined into fewer shapes, and union for a polygon overlay.
-- Only set "output" when the user names an output file. Otherwise leave it out; names are \
-generated automatically.
+- Only set "output" when the user names an output file, and use the extension they named. \
+Do not change .fgb, .shp, or .geojson to .gpkg. Otherwise leave it out; the name and the \
+input's format are kept automatically. Use convert when the user asks for a different format.
 - Only add the steps the user asked for. Clip, difference, union, buffer and merge handle \
 different CRSs themselves, so don't add reproject steps for them. Buffer accepts meters, \
 kilometers, feet or miles, so keep the user's distance and units as given.
@@ -95,6 +96,20 @@ EXAMPLES = [
                 Select(input="$step1", columns=["apn", "zoning"], output="residential.gpkg"),
             ],
             message="Keep residential parcels over 1 acre, with the apn and zoning columns.",
+        ),
+    ),
+    Example(
+        files="- shapes.fgb: vector, Polygon, 40 features, EPSG:4326, "
+        "fields [country_of_residence:str, sector:str, beds:int, name:str]",
+        request="keep shapes in Spain, then keep only the name column",
+        plan=Plan(
+            steps=[
+                Filter(input="shapes.fgb", where=[
+                    Condition(field="country_of_residence", op="==", value="Spain"),
+                ]),
+                Select(input="$step1", columns=["name"]),
+            ],
+            message="Keep shapes in Spain, then keep only the name column.",
         ),
     ),
     Example(
