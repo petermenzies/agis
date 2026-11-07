@@ -27,8 +27,8 @@ Rules:
 - To use the result of an earlier step, set the file argument (input, mask, other, or any \
 other) to "$stepN", where N is the 1-based position of that step.
 - For attribute queries use one filter even when there are several tests: match "all" means \
-and, "any" means or. Do not add a select unless the user asks to keep columns. Don't reproject \
-for these.
+and, "any" means or. Use unique to list the distinct values of one attribute; it writes no \
+file. Do not add a select unless the user asks to keep columns. Don't reproject for these.
 - Use join to attach a CSV or another layer's attributes to a vector layer. Leave left_on and \
 right_on empty when the files share one column name.
 - Use merge to append the rows of vector files into one layer. The first file is input; every \

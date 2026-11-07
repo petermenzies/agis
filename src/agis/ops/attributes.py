@@ -7,14 +7,16 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 import pandas as pd
+import pyogrio
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agis.errors import AgisError
 from agis.ops.base import OpArgs, StepResult
 from agis.ops.geoprocessing import INPUT_DESC, OUTPUT_DESC
-from agis.ops.io import read_vector, write_vector
+from agis.ops.io import Kind, read_vector, write_vector
 
 CompareOp = Literal["==", "!=", ">", ">=", "<", "<=", "contains", "in", "is_null", "not_null"]
+_UNIQUE_LIMIT = 100
 _OP_WORD = {"==": "eq", "!=": "ne", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
             "contains": "has", "in": "in", "is_null": "null", "not_null": "present"}
 
@@ -119,6 +121,68 @@ class Select(OpArgs):
         dropped = [c for c in gdf.columns if c not in result.columns]
         return StepResult(output, "vector",
                           f"kept {', '.join(chosen)}; dropped {', '.join(dropped) or 'nothing'}")
+
+
+class Unique(OpArgs):
+    op: Literal["unique"] = "unique"
+    input: str = Field(description=INPUT_DESC)
+    field: str = Field(description="Attribute field whose distinct values to list.")
+
+    summary: ClassVar = (
+        "List the distinct values of one attribute. Prints them and writes no file."
+    )
+
+    def output_kind(self, input_kind: Kind) -> Kind | None:
+        return None
+
+    def run(self, inputs: dict[str, Path], output: Path | None) -> StepResult:
+        path = inputs["input"]
+        field = _resolve_attribute(path, self.field)
+        frame = pyogrio.read_dataframe(path, columns=[field], read_geometry=False)
+        series = frame[field]
+        empty = int(series.isna().sum())
+        values = _sorted_unique(series.dropna())
+        shown = values[:_UNIQUE_LIMIT]
+        lines = [f"{field}: {len(values)} values", *[str(value) for value in shown]]
+        if len(values) > _UNIQUE_LIMIT:
+            lines.append(f"and {len(values) - _UNIQUE_LIMIT} more")
+        if empty:
+            lines.append(f"{empty} empty")
+        return StepResult(None, None, "\n".join(lines))
+
+
+def _resolve_attribute(path: Path, name: str) -> str:
+    """Match a field name, ignoring case, without reading the features."""
+    info = pyogrio.read_info(path)
+    geometry = info.get("geometry_name")
+    raw = info.get("fields")
+    attributes = [] if raw is None else [str(field) for field in raw]
+    if name in attributes:
+        return name
+    matches = [field for field in attributes if field.casefold() == name.casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    if geometry and name.casefold() == str(geometry).casefold():
+        raise AgisError(f"{name!r} is the geometry column, not an attribute")
+    raise AgisError(f"no field named {name!r}; available fields: {', '.join(attributes)}")
+
+
+def _sorted_unique(series: pd.Series) -> list:
+    try:
+        values = list(pd.unique(series))
+    except TypeError:
+        values = list(pd.unique(series.map(str)))
+    return sorted(values, key=lambda value: (not _numeric(value), _order(value)))
+
+
+def _numeric(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _order(value):
+    if _numeric(value):
+        return float(value)
+    return str(value).casefold()
 
 
 def resolve_field(gdf, name: str) -> str:

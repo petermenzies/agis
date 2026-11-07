@@ -4,7 +4,7 @@ import pytest
 from shapely.geometry import Point
 
 from agis.errors import AgisError
-from agis.ops.attributes import Condition, Filter, Select
+from agis.ops.attributes import Condition, Filter, Select, Unique
 
 
 def _points(tmp_path):
@@ -87,6 +87,27 @@ def test_select_keeps_geometry_and_drops_the_rest(data, tmp_path):
     assert list(kept.columns) == ["name", "geometry"]
     assert "acres" in result.message
     assert kept.crs.to_epsg() == 4326
+
+
+def test_unique_lists_sorted_values(data):
+    result = Unique(input="roads.gpkg", field="Name").run({"input": data["roads"]}, None)
+    assert result.output is None
+    assert result.message.splitlines() == [
+        "name: 4 values", "Geary Blvd", "Market St", "Mission St", "Van Ness Ave",
+    ]
+
+
+def test_unique_unknown_field(tmp_path):
+    src = _points(tmp_path)
+    with pytest.raises(AgisError, match="available fields"):
+        Unique(input="places.gpkg", field="nope").run({"input": src}, None)
+
+
+def test_unique_counts_empty_and_omits_them_from_the_list(tmp_path):
+    src = _points(tmp_path)
+    lines = Unique(input="places.gpkg", field="name").run(
+        {"input": src}, None).message.splitlines()
+    assert lines == ["name: 2 values", "Market", "mission", "1 empty"]
 
 
 def test_select_unknown_column(data, tmp_path):

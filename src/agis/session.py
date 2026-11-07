@@ -14,7 +14,6 @@ from agis.context import build_context
 from agis.errors import AgisError, PlanError, StepError
 from agis.executor import ResolvedStep, cleanup, make_workdir, resolve, run
 from agis.llm import Backend
-from agis.ops.geoprocessing import Info
 from agis.plan import Plan
 from agis.planner import InvalidPlanOutput, Planner, compact_json
 
@@ -126,23 +125,24 @@ class Session:
             self.console.print(f"   output: {output}")
 
     def _confirm(self, steps: list[ResolvedStep], options: Options) -> bool:
-        if options.yes or all(isinstance(s.args, Info) for s in steps):
+        if options.yes or all(step.output is None for step in steps):
             return True
         if not sys.stdin.isatty():
             raise AgisError("not running in a terminal; pass --yes to run without confirming")
         return Confirm.ask("Run this plan?", default=True, console=self.console)
 
     def _announce(self, step: ResolvedStep) -> None:
-        if not isinstance(step.args, Info):
+        if step.output is not None:
             self.console.print(f"[dim]step {step.number}: {step.args.op}...[/dim]")
 
     def _report(self, steps: list[ResolvedStep], results) -> list[Path]:
         created = []
         for step, result in zip(steps, results):
-            if isinstance(step.args, Info):
-                self.console.print(result.message, markup=False)
+            if step.output is None:
+                if result.message:
+                    self.console.print(result.message, markup=False)
                 continue
-            if step.temporary or step.output is None:
+            if step.temporary:
                 continue
             created.append(step.output)
             self.console.print(f"[green]Wrote[/green] {escape(self._rel(step.output))}"

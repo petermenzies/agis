@@ -3,9 +3,10 @@ from io import StringIO
 from rich.console import Console
 
 from agis.executor import ResolvedStep
-from agis.ops.attributes import Condition, Filter
+from agis.ops.attributes import Condition, Filter, Unique
+from agis.ops.base import StepResult
 from agis.plan import Plan
-from agis.session import Session, _detail
+from agis.session import Options, Session, _detail
 
 
 def test_preview_shows_full_operation_details(tmp_path):
@@ -33,6 +34,19 @@ def test_preview_shows_full_operation_details(tmp_path):
     assert f"details: where=['status', '==', '{status}']" in lines
     assert f"output: {output.name}" in lines
     assert "'field':" not in wide
+
+
+def test_a_step_that_writes_nothing_prints_its_message(tmp_path):
+    args = Unique(input="roads.gpkg", field="name")
+    step = ResolvedStep(
+        number=1, args=args, inputs={}, output=None, kind=None, temporary=False, stem="roads",
+    )
+    buf = StringIO()
+    session = Session(backend=None, cwd=tmp_path,
+                      console=Console(file=buf, force_terminal=False, width=80))
+    session._report([step], [StepResult(None, None, "name: 1 values\nMarket")])
+    assert "Market" in buf.getvalue()
+    assert session._confirm([step], Options()) is True
 
 
 def test_filter_where_reads_as_a_condition():

@@ -21,7 +21,7 @@ from agis.ops.tiling import TileRaster
 def test_registry_has_all_ops():
     assert set(REGISTRY) == {
         "reproject", "clip", "difference", "union", "buffer", "dissolve", "convert", "info",
-        "tile_raster", "filter", "select", "join", "merge",
+        "tile_raster", "filter", "select", "unique", "join", "merge",
     }
 
 

@@ -64,6 +64,7 @@ Outputs are named after their inputs and steps (`roads_clipped_3857.gpkg`) unles
 | buffer (meters, kilometers, feet, miles; correct in any CRS) | vector |
 | dissolve (all, or by a field) | vector |
 | filter (keep rows by attribute: equals, comparisons, contains, in, null) | vector |
+| unique (list the distinct values of one attribute) | vector |
 | select (keep named columns; geometry is always kept) | vector |
 | join (attach a CSV, TSV, or another layer's columns on a shared field) | vector + table |
 | info | vector, raster, table |
