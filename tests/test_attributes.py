@@ -1,10 +1,46 @@
 import geopandas as gpd
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 from shapely.geometry import Point
 
 from agis.errors import AgisError
 from agis.ops.attributes import Condition, Filter, Select, Unique
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("net_1000", "1000"),
+    ("/Users/me/shapes/province/1000", "1000"),
+    ("/Users/me/agis/data/340524.0", "340524.0"),
+    ("1,000", "1,000"),
+    ("12.5", "12.5"),
+    ("-3", "-3"),
+])
+def test_numeric_comparison_keeps_only_the_number(value, expected):
+    assert Condition(field="shape_id", op="<", value=value).value == expected
+
+
+@pytest.mark.parametrize("value,expected", [(1000, "1000"), (1000.0, "1000"), (2.5, "2.5")])
+def test_a_json_number_becomes_text(value, expected):
+    assert Condition(field="shape_id", op="<", value=value).value == expected
+
+
+@pytest.mark.parametrize("value", ["", "testing", None])
+def test_a_missing_number_is_reported_by_check(value):
+    filt = Filter(input="fishing.fgb", where=[Condition(field="shape_id", op="<", value=value)])
+    problems = filt.check({"input": "vector"})
+    assert len(problems) == 1 and "< needs a number for shape_id" in problems[0]
+
+
+def test_text_ops_still_need_a_value():
+    with pytest.raises(ValidationError, match="needs a value"):
+        Condition(field="name", op="==", value="")
+
+
+def test_text_value_drops_an_absolute_path():
+    assert Condition(field="country", op="==", value="/Users/me/data/Spain").value == "Spain"
+    assert Condition(field="status", op="==", value="N/A").value == "N/A"
+    assert Condition(field="day", op="==", value="2024/01/01").value == "2024/01/01"
 
 
 def _points(tmp_path):
@@ -70,7 +106,7 @@ def test_filter_null_and_missing_field(tmp_path):
 
 def test_filter_rejects_a_missing_value():
     with pytest.raises(ValueError, match="needs a value"):
-        Condition(field="lanes", op=">=")
+        Condition(field="name", op="contains")
 
 
 def test_filter_rejects_a_value_on_a_null_check():

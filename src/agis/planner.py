@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from pydantic import ValidationError
 
 from agis.context import Context
 from agis.errors import LLMError, PlanError
 from agis.llm import Backend, Message
-from agis.ops.attributes import Condition, Filter, Select
+from agis.ops.attributes import NUMERIC_OPS, Condition, Filter, Select, is_number
 from agis.ops.geoprocessing import Buffer, Clip, Difference, Info, Reproject
 from agis.ops.join import Join
 from agis.ops.merge import Merge
 from agis.ops.tiling import TileRaster
-from agis.plan import Plan, describe_ops, plan_schema
+from agis.plan import Plan, describe_ops, plan_schema, step_ref
 
 SYSTEM_PROMPT = """You are agis, a planner for GIS tasks. Turn the user's request into a JSON plan \
 that uses only these operations:
@@ -205,6 +207,123 @@ def compact_json(plan: Plan) -> str:
         defaults = {name: f.default for name, f in type(step).model_fields.items()}
         steps.append({k: v for k, v in full.items() if k == "op" or v != defaults.get(k)})
     return json.dumps({"steps": steps, "message": plan.message})
+
+
+def keep_named_outputs(plan: Plan, request: str) -> Plan:
+    """Clear output names the request doesn't mention, so they are generated instead.
+
+    A name given without an extension keeps the stem; the executor adds the input's format.
+    """
+    plan = link_steps(plan)
+    inputs = {
+        Path(value).stem.casefold()
+        for step in plan.steps for name in step.input_fields
+        for value in _file_values(getattr(step, name, None))
+    }
+    steps = []
+    for step in plan.steps:
+        output = getattr(step, "output", None)
+        if output:
+            path = Path(output)
+            if _mentions(request, output) or _mentions(request, path.name):
+                pass
+            elif path.stem.casefold() not in inputs and _mentions(request, path.stem):
+                output = str(path.with_suffix(""))
+            else:
+                output = None
+        if output != getattr(step, "output", None):
+            step = step.model_copy(update={"output": output})
+        steps.append(step)
+    named = _save_as(request)
+    last = steps[-1] if steps else None
+    if (named and last is not None and "output" in type(last).model_fields
+            and not any(getattr(s, "output", None) for s in steps)):
+        steps[-1] = last.model_copy(update={"output": named})
+    return plan.model_copy(update={"steps": steps})
+
+
+def link_steps(plan: Plan) -> Plan:
+    """Turn a later step's use of an earlier step's output name into "$stepN".
+
+    The model often names an intermediate file and then reads it by that name. A step that
+    refers to itself means the step before it.
+    """
+    written: dict[str, int] = {}
+    steps = []
+    for number, step in enumerate(plan.steps, start=1):
+        update = {}
+        for name in step.input_fields:
+            raw = getattr(step, name, None)
+            values = raw if isinstance(raw, list) else [raw]
+            linked = [_link(v, number, written) for v in values]
+            if linked != values:
+                update[name] = linked if isinstance(raw, list) else linked[0]
+        if update:
+            step = step.model_copy(update=update)
+        output = getattr(step, "output", None)
+        if output:
+            written.setdefault(Path(output).name.casefold(), number)
+        steps.append(step)
+    return plan.model_copy(update={"steps": steps})
+
+
+def _link(value, number: int, written: dict[str, int]):
+    if not isinstance(value, str):
+        return value
+    ref = step_ref(value)
+    if ref is not None:
+        return f"$step{number - 1}" if ref == number and number > 1 else value
+    source = written.get(Path(value).name.casefold())
+    return f"$step{source}" if source is not None else value
+
+
+def fill_numbers(plan: Plan, request: str) -> Plan:
+    """Take a numeric comparison's value from the request when the model's isn't a number.
+
+    The number has to follow the field name, so "buffer by 1km then filter shape_id < 1000"
+    gives 1000.
+    """
+    steps = []
+    for step in plan.steps:
+        if isinstance(step, Filter) and any(
+            c.op in NUMERIC_OPS and not is_number(c.value) for c in step.where
+        ):
+            where = []
+            for cond in step.where:
+                found = None
+                if cond.op in NUMERIC_OPS and not is_number(cond.value):
+                    found = _number_after(request, cond.field)
+                where.append(cond if found is None else cond.model_copy(update={"value": found}))
+            step = step.model_copy(update={"where": where})
+        steps.append(step)
+    return plan.model_copy(update={"steps": steps})
+
+
+def _number_after(request: str, field: str) -> str | None:
+    name = r"[_\s]+".join(re.escape(part) for part in re.split(r"[_\s]+", field.strip()) if part)
+    if not name:
+        return None
+    pattern = rf"(?<![\w]){name}(?!\w)[^\d\n]{{0,40}}?(-?\d[\d,]*(?:\.\d+)?)(?![\w.])"
+    m = re.search(pattern, request, re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+def _save_as(request: str) -> str | None:
+    """The file in "save as X" or "write it to X", which the model sometimes leaves out."""
+    m = re.search(r"\b(?:save|write|export)\b(?:\s+\w+){0,3}?\s+(?:as|to)\s+"
+                  r"[\"']?([\w~./\\-]+\.[A-Za-z0-9]+)", request, re.IGNORECASE)
+    return m.group(1).rstrip(".") if m else None
+
+
+def _mentions(request: str, name: str) -> bool:
+    # Whole name only: "roads" is not mentioned by "roads.fgb", and "a.gpkg" not by "data.gpkg".
+    pattern = rf"(?<![\w.\-/]){re.escape(name)}(?![\w\-]|\.\w)"
+    return re.search(pattern, request, re.IGNORECASE) is not None
+
+
+def _file_values(value: object) -> list[str]:
+    values = value if isinstance(value, list) else [value]
+    return [v for v in values if isinstance(v, str) and step_ref(v) is None]
 
 
 def user_message(context_text: str, request: str) -> str:

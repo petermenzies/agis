@@ -57,7 +57,7 @@ def detect_hardware() -> Hardware:
 
 def recommend_model(_hw: Hardware) -> ModelChoice:
     """The model setup offers. Hardware is still reported, but it doesn't change the choice."""
-    return ModelChoice(config_mod.DEFAULT_MODEL, 1.9,
+    return ModelChoice(config_mod.DEFAULT_MODEL, 4.7,
                        "best balance of speed and planning accuracy")
 
 

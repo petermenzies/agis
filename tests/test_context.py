@@ -23,6 +23,12 @@ def test_named_file_is_described_and_the_rest_are_listed(data, tmp_path):
     assert "parks.geojson" in text.split("Other files: ", 1)[1]
 
 
+def test_context_hides_the_working_directory_path(data, tmp_path):
+    text = build_context("reproject roads", tmp_path).render()
+    assert text.splitlines()[0] == "Working directory: ."
+    assert str(tmp_path) not in text and tmp_path.name not in text
+
+
 def test_unnamed_request_describes_only_up_to_the_cap(tmp_path):
     for i in range(MAX_DESCRIBED + 3):
         (tmp_path / f"layer{i:02d}.csv").write_text("id,value\n1,a\n")

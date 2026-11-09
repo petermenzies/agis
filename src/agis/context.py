@@ -29,7 +29,9 @@ class Context:
     cache: dict | None = None
 
     def render(self) -> str:
-        lines = [f"Working directory: {self.cwd}"]
+        # "." rather than the real path, which the model copies into argument values. Without
+        # the line at all, the model drops later steps of a chain.
+        lines = ["Working directory: ."]
         # A request that names files only opens those, plus anything this session wrote.
         # A request that names nothing ("what is in this folder?") describes the first few.
         if self.mentioned or self.recent:

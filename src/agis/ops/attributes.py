@@ -8,7 +8,7 @@ from typing import ClassVar, Literal
 
 import pandas as pd
 import pyogrio
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agis.errors import AgisError
 from agis.ops.base import OpArgs, StepResult
@@ -28,7 +28,18 @@ class Condition(BaseModel):
 
     field: str
     op: CompareOp
-    value: str | None = None
+    value: str | float | None = None
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _number_as_text(cls, value):
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, float):
+            return str(int(value)) if value.is_integer() else repr(value)
+        return value
 
     @model_validator(mode="after")
     def _value_required(self):
@@ -39,9 +50,41 @@ class Condition(BaseModel):
                     f"{self.value!r}"
                 )
             return self
+        if self.op in NUMERIC_OPS:
+            # A missing or bad number is repaired from the request, then checked by Filter.
+            self.value = _numeric_value(self.value or "")
+            return self
         if not (self.value and self.value.strip()):
             raise ValueError(f"{self.op} needs a value")
+        self.value = _strip_path(self.value)
         return self
+
+
+NUMERIC_OPS = (">", ">=", "<", "<=")
+
+
+def is_number(value: str | None) -> bool:
+    try:
+        float(_unquote(value or "").replace(",", ""))
+    except ValueError:
+        return False
+    return True
+
+
+def _numeric_value(value: str) -> str:
+    """The number in a comparison value. The model sometimes prefixes a file name or path."""
+    text = value.strip()
+    if is_number(text):
+        return text
+    trailing = re.search(r"(?<![\d.])\d[\d,]*(?:\.\d+)?$", text)
+    return trailing.group(0) if trailing else text
+
+
+def _strip_path(value: str) -> str:
+    text = value.strip()
+    if text[:1] in ("/", "~") and text.strip("/").count("/") >= 1:
+        return text.rstrip("/").rsplit("/", 1)[-1]
+    return value
 
 
 class Filter(OpArgs):
@@ -53,6 +96,7 @@ class Filter(OpArgs):
         "'is X' and 'equals X' are ==. 'is not X' and 'exclude X' are !=. "
         "'at least' and 'N or more' are >=; 'more than' and 'over' are >; 'fewer than' is <. "
         "For in, separate values with commas. "
+        "value is the literal text or number from the request, never a file name or path. "
         "is_null means that named field is missing, blank, or has no value. "
         "not_null means that named field is filled in or present. "
         "is_null and not_null take no value, and they apply only to the field the user named. "
@@ -68,6 +112,13 @@ class Filter(OpArgs):
     summary: ClassVar = (
         "Keep vector features whose attributes match the conditions. Does not change geometry."
     )
+
+    def check(self, kinds: dict[str, Kind | list[Kind]]) -> list[str]:
+        problems = super().check(kinds)
+        for cond in self.where:
+            if cond.op in NUMERIC_OPS and not is_number(cond.value):
+                problems.append(f"{cond.op} needs a number for {cond.field}, got {cond.value!r}")
+        return problems
 
     def suffix(self) -> str:
         if len(self.where) != 1:

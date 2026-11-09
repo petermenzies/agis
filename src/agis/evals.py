@@ -21,7 +21,13 @@ from agis.executor import resolve
 from agis.llm import make_backend
 from agis.ops.geoprocessing import UNIT_METERS
 from agis.plan import Plan
-from agis.planner import InvalidPlanOutput, Planner, compact_json
+from agis.planner import (
+    InvalidPlanOutput,
+    Planner,
+    compact_json,
+    fill_numbers,
+    keep_named_outputs,
+)
 from agis.sample_data import write_sample_data
 
 PATH_FIELDS = {"input", "mask", "other", "output"}
@@ -92,6 +98,7 @@ def run_case(planner: Planner, case: dict, data_dir: Path, workdir: Path) -> Cas
     for attempt in range(2):
         try:
             plan = planner.plan(case["prompt"], context, feedback)
+            plan = fill_numbers(keep_named_outputs(plan, case["prompt"]), case["prompt"])
         except InvalidPlanOutput as exc:
             raw, plan = exc.raw, None
             feedback.append((exc.raw, exc.problems))

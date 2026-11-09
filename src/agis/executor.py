@@ -120,6 +120,8 @@ def resolve(plan: Plan, cwd: Path, workdir: Path, force: bool = False) -> list[R
                 output = _absolute(Path(args.output).expanduser(), cwd)
                 if output.suffix:
                     logical = output.suffix.lower()
+                else:
+                    output = output.with_name(output.name + logical)
             elif number in referenced:
                 # Keep a temp vector as GeoPackage. Convert writes its target format.
                 disk = TEMP_EXT[kind] if not isinstance(args, Convert) else logical

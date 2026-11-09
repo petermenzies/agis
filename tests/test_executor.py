@@ -48,6 +48,25 @@ def test_named_output_keeps_its_extension(data, tmp_path):
     assert steps[1].output == (tmp_path / "kept.gpkg").resolve()
 
 
+def test_named_output_without_extension_gets_the_input_format(data, tmp_path):
+    plan = Plan(steps=[Dissolve(input="parks.geojson"),
+                       Buffer(input="$step1", distance=10, output="buildable")])
+    steps = resolve(plan, tmp_path, tmp_path / "w")
+    assert steps[1].output == (tmp_path / "buildable.geojson").resolve()
+
+
+def test_session_ignores_invented_gpkg_outputs(data, tmp_path):
+    backend = FakeBackend([{"steps": [
+        {"op": "reproject", "input": "parks.geojson", "crs": "EPSG:3857",
+         "output": "parks_reproj.gpkg"},
+        {"op": "buffer", "input": "$step1", "distance": 10, "output": "parks_buffer.gpkg"},
+    ]}])
+    session = Session(backend, tmp_path, console=Console(quiet=True))
+    created = session.handle("reproj parks.geojson to 3857 and then buffer by 10 m",
+                             Options(yes=True))
+    assert [p.name for p in created] == ["parks_3857_buffer10m.geojson"]
+
+
 def test_missing_file_and_bad_ref_reported_together(data, tmp_path):
     plan = Plan(steps=[Buffer(input="rivers.shp", distance=5),
                        Dissolve(input="$step3")])

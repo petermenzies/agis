@@ -15,7 +15,13 @@ from agis.errors import AgisError, PlanError, StepError
 from agis.executor import ResolvedStep, cleanup, make_workdir, resolve, run
 from agis.llm import Backend
 from agis.plan import Plan
-from agis.planner import InvalidPlanOutput, Planner, compact_json
+from agis.planner import (
+    InvalidPlanOutput,
+    Planner,
+    compact_json,
+    fill_numbers,
+    keep_named_outputs,
+)
 
 
 @dataclass
@@ -40,7 +46,8 @@ class Session:
         planner = Planner(self.backend)
         context = build_context(request, self.cwd, self.recent, self.summaries)
         if options.verbose:
-            self.console.print(context.render() + "\n", style="dim", markup=False)
+            self.console.print(f"Working directory: {self.cwd}\n{context.render()}\n",
+                               style="dim", markup=False)
 
         feedback: list[tuple[str, list[str]]] = []
         workdir = make_workdir()
@@ -50,6 +57,7 @@ class Session:
                 with self.console.status(f"Planning with {self.backend.model}..."):
                     try:
                         plan = planner.plan(request, context, feedback)
+                        plan = fill_numbers(keep_named_outputs(plan, request), request)
                     except InvalidPlanOutput as exc:
                         if last:
                             raise

@@ -22,7 +22,9 @@ uv tool install agis-spatial   # or: pipx install agis-spatial
 agis setup
 ```
 
-`agis setup` checks that Ollama is running (and offers to start it), downloads `qwen2.5:3b`, and saves that choice to `~/.config/agis/config.toml`. Pass `--model` to use a different one.
+`agis setup` checks that Ollama is running (and offers to start it), downloads `qwen2.5:7b`, and saves that choice to `~/.config/agis/config.toml`. Pass `--model` to use a different one.
+
+Of the models tested, `qwen2.5:7b` provides the best balance of accuracy and speed. `qwen2.5:3b` tends to work equally well for single operations but things can get weird with multi-step operations.
 
 You don't need Conda, a system GDAL, or any particular Python: `uv` installs agis in its own environment with its own Python, and the geospatial libraries ship with GDAL, PROJ and GEOS built in.
 
@@ -105,7 +107,7 @@ To add an operation, subclass `OpArgs` in `agis/ops/` with an `op: Literal["name
 ```bash
 uv venv && uv pip install -e ".[dev]"
 .venv/bin/pytest                  # unit tests, no model needed
-.venv/bin/agis eval -m qwen2.5:3b   # plan accuracy against tests/evals/cases.yaml
+.venv/bin/agis eval -m qwen2.5:7b   # plan accuracy against tests/evals/cases.yaml
 ```
 
 `agis eval` runs each case in `tests/evals/cases.yaml` against generated sample data and compares the plan to the expected one (CRSs, units and file names are normalized). Use it to compare models or check prompt changes; `--only` filters cases and `--show` prints every plan.
