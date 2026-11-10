@@ -10,12 +10,17 @@ import ollama
 from agis.errors import LLMError
 
 Message = dict[str, str]
+NUM_CTX = 8192
 
 
 class Backend(Protocol):
     model: str
 
     def generate_json(self, messages: list[Message], schema: dict) -> str: ...
+
+    def ready(self) -> bool:
+        """True when the model is in memory with enough context to plan."""
+        ...
 
 
 class OllamaBackend:
@@ -30,7 +35,7 @@ class OllamaBackend:
                 model=self.model,
                 messages=messages,
                 format=schema,
-                options={"temperature": 0, "num_ctx": 8192},
+                options={"temperature": 0, "num_ctx": NUM_CTX},
                 keep_alive="10m",
             )
         except ollama.ResponseError as exc:
@@ -47,6 +52,15 @@ class OllamaBackend:
             ) from exc
         return response.message.content or ""
 
+    def ready(self) -> bool:
+        try:
+            response = httpx.get(f"{_host(self.host)}/api/ps", timeout=2)
+            response.raise_for_status()
+            models = response.json().get("models") or []
+        except (httpx.HTTPError, ValueError):
+            return False
+        return model_ready(models, self.model, NUM_CTX)
+
     def installed_models(self) -> list[str]:
         try:
             return [m.model for m in self.client.list().models]
@@ -56,3 +70,23 @@ class OllamaBackend:
 
 def make_backend(model: str, host: str | None = None) -> Backend:
     return OllamaBackend(model, host)
+
+
+def model_ready(models: list[dict], name: str, num_ctx: int) -> bool:
+    """True when one running model is `name` and its context can hold a plan."""
+    for item in models:
+        found = item.get("model") or item.get("name") or ""
+        if not _same_model(name, found):
+            continue
+        context = item.get("context_length")
+        return context is None or context >= num_ctx
+    return False
+
+
+def _same_model(wanted: str, found: str) -> bool:
+    wanted, found = wanted.casefold(), found.casefold()
+    return wanted == found or (":" not in wanted and found == f"{wanted}:latest")
+
+
+def _host(host: str | None) -> str:
+    return (host or "http://127.0.0.1:11434").rstrip("/")

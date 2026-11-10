@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Thread
 
 from rich.console import Console
 from rich.markup import escape
@@ -54,11 +55,9 @@ class Session:
         try:
             for attempt in range(options.retries + 1):
                 last = attempt == options.retries
-                with self.console.status(f"Planning with {self.backend.model}..."):
-                    try:
-                        plan = planner.plan(request, context, feedback)
-                        plan = fill_numbers(keep_named_outputs(plan, request), request)
-                    except InvalidPlanOutput as exc:
+                try:
+                    plan = self._plan(planner, request, context, feedback)
+                except InvalidPlanOutput as exc:
                         if last:
                             raise
                         feedback.append((exc.raw, exc.problems))
@@ -107,6 +106,33 @@ class Session:
         finally:
             cleanup(workdir)
         return []
+
+    def _plan(self, planner: Planner, request: str, context, feedback) -> Plan:
+        """Plan, saying so when the model is loading into memory and when it is generating."""
+        model = self.backend.model
+        loaded = self.backend.ready()
+        cold = not loaded
+        box: dict = {}
+
+        def work() -> None:
+            try:
+                plan = planner.plan(request, context, feedback)
+                box["plan"] = fill_numbers(keep_named_outputs(plan, request), request)
+            except Exception as exc:  # noqa: BLE001  re-raised on the calling thread
+                box["error"] = exc
+
+        thread = Thread(target=work, daemon=True)
+        thread.start()
+        with self.console.status(_status(model, loaded, cold)) as status:
+            while thread.is_alive():
+                thread.join(0.25)
+                if not loaded and self.backend.ready():
+                    loaded = True
+                    status.update(_status(model, True, cold))
+        thread.join()
+        if "error" in box:
+            raise box["error"]
+        return box["plan"]
 
     def preview(self, plan: Plan, steps: list[ResolvedStep]) -> None:
         if plan.message:
@@ -168,6 +194,14 @@ class Session:
             return str(path.relative_to(self.cwd.resolve()))
         except ValueError:
             return str(path)
+
+
+def _status(model: str, loaded: bool, cold: bool) -> str:
+    if not loaded:
+        return f"Startup: Loading {model}..."
+    if cold:
+        return "Startup: Initializing session..."
+    return f"Planning with {model}..."
 
 
 def _detail(name: str, value) -> str:

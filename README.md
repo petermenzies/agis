@@ -1,6 +1,8 @@
 # agis
 
-Run simple GIS tasks by describing them in plain English. Everything runs on your machine with a local model; no API keys, and your data never leaves your computer.
+Run simple GIS tasks by describing them in plain English. Everything runs on your machine with a local model; no API keys, no token expenditure, and your data never leaves your computer.
+
+The model simply interprets natural language input to form a rigid JSON schema — from there, agis executes existing, tested python scripts.
 
 ```console
 $ agis "clip roads.gpkg to county.shp and reproject to web mercator"
@@ -43,6 +45,8 @@ agis "what projection is dem.tif in?"
 `agis` on its own opens the prompt. Arrow keys move through the line you are typing, and up and down walk requests from this session and from earlier ones (`~/.config/agis/history`). Tab completes dataset names in the working folder. `ls`, `cd`, and `pwd` run locally and are not sent to the model. `exit` or Ctrl-D quits. A quoted request still runs once and exits.
 
 agis reads the files in the current folder (CRS, geometry type, fields, raster bands) so the model knows what it's working with. It always shows the plan before running it.
+
+An agis session keeps the model primed until 10 minutes of idle time have elapsed. Starting cold, the initial agis call will take a few extra seconds to get the model loaded into memory and to feed in the first system prompt of the session. Subsequent calls will be notably faster.
 
 | Option | Effect |
 | --- | --- |

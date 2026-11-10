@@ -1,4 +1,6 @@
 import json
+import time
+from io import StringIO
 
 import geopandas as gpd
 import pytest
@@ -174,6 +176,51 @@ class FakeBackend:
     def generate_json(self, messages, schema):
         self.calls.append(messages)
         return json.dumps(self.responses.pop(0))
+
+    def ready(self) -> bool:
+        return True
+
+
+def test_status_says_loading_until_the_model_is_ready(data, tmp_path):
+    class Loading(FakeBackend):
+        def __init__(self):
+            super().__init__([{"steps": [{"op": "dissolve", "input": "zones.gpkg"}]}])
+            self.checks = 0
+
+        def ready(self) -> bool:
+            self.checks += 1
+            return self.checks > 2
+
+        def generate_json(self, messages, schema):
+            time.sleep(0.6)
+            return super().generate_json(messages, schema)
+
+    class Recording(Console):
+        def __init__(self):
+            super().__init__(file=StringIO(), quiet=True)
+            self.messages: list[str] = []
+
+        def status(self, text, **kwargs):
+            self.messages.append(text)
+            console = self
+
+            class Shown:
+                def update(self, text, **kwargs):
+                    console.messages.append(text)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+            return Shown()
+
+    console = Recording()
+    session = Session(Loading(), tmp_path, console=console)
+    session.handle("dissolve zones", Options(yes=True))
+    assert console.messages[0] == "Loading fake..."
+    assert "Initializing session..." in console.messages
 
 
 def test_session_replans_after_step_failure(data, tmp_path):
