@@ -219,8 +219,8 @@ def test_status_says_loading_until_the_model_is_ready(data, tmp_path):
     console = Recording()
     session = Session(Loading(), tmp_path, console=console)
     session.handle("dissolve zones", Options(yes=True))
-    assert console.messages[0] == "Loading fake..."
-    assert "Initializing session..." in console.messages
+    assert console.messages[0] == "Startup: Loading fake..."
+    assert "Startup: Initializing session..." in console.messages
 
 
 def test_session_replans_after_step_failure(data, tmp_path):
