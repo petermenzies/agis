@@ -5,13 +5,14 @@ Run simple GIS tasks by describing them in plain English. Everything runs on you
 The model simply interprets natural language input to form a rigid JSON schema — from there, agis executes existing, tested python scripts.
 
 ```console
-$ agis "clip roads.gpkg to county.shp and reproject to web mercator"
-Clip roads to the county and reproject to Web Mercator (EPSG:3857).
-#  operation  details                           output
-1  clip       input=roads.gpkg mask=county.shp  (intermediate)
-2  reproject  input=$step1 crs=EPSG:3857        roads_clipped_3857.gpkg
+$ agis "reproject roads.gpkg to web mercator"
+Reproject roads to Web Mercator (EPSG:3857).
+1  op: reproject
+   input: roads.gpkg
+   details: crs=EPSG:3857
+   output: roads_3857.gpkg
 Run this plan? [y/n] (y):
-Wrote roads_clipped_3857.gpkg  reprojected to EPSG:3857 (WGS 84 / Pseudo-Mercator)
+Wrote roads_3857.gpkg  reprojected to EPSG:3857 (WGS 84 / Pseudo-Mercator)
 ```
 
 ## Install (macOS)
@@ -24,9 +25,7 @@ uv tool install agis-spatial   # or: pipx install agis-spatial
 agis setup
 ```
 
-`agis setup` checks that Ollama is running (and offers to start it), downloads `qwen2.5:7b`, and saves that choice to `~/.config/agis/config.toml`. Pass `--model` to use a different one.
-
-Of the models tested, `qwen2.5:7b` provides the best balance of accuracy and speed. `qwen2.5:3b` tends to work equally well for single operations but things can get weird with multi-step operations.
+`agis setup` checks that Ollama is running (and offers to start it), downloads `qwen2.5:3b`, and saves that choice to `~/.config/agis/config.toml`. Pass `--model` to use a different one.
 
 You don't need Conda, a system GDAL, or any particular Python: `uv` installs agis in its own environment with its own Python, and the geospatial libraries ship with GDAL, PROJ and GEOS built in.
 
@@ -37,14 +36,14 @@ If something isn't working, run `agis doctor` and include its output in bug repo
 ```bash
 agis                          # interactive prompt; later requests can say "now buffer that"
 agis "reproject parcels.shp to EPSG:2227"
-agis "buffer the streams by 30 m and remove that from parcels, save as buildable.gpkg"
+agis "buffer the streams by 30 m, save as streams_buffer.gpkg"
 agis "make an MBTiles file from ortho.tif up to zoom 16"
 agis "what projection is dem.tif in?"
 ```
 
 `agis` on its own opens the prompt. Arrow keys move through the line you are typing, and up and down walk requests from this session and from earlier ones (`~/.config/agis/history`). Tab completes dataset names in the working folder. `ls`, `cd`, and `pwd` run locally and are not sent to the model. `exit` or Ctrl-D quits. A quoted request still runs once and exits.
 
-agis reads the files in the current folder (CRS, geometry type, fields, raster bands) so the model knows what it's working with. It always shows the plan before running it.
+agis reads the files in the current folder (CRS, geometry type, fields, raster bands) so the model knows what it's working with. It always shows the plan before running it. Each request is one operation. A request that needs two gets a short explanation instead of a plan; ask for the next operation afterwards.
 
 An agis session keeps the model primed until 10 minutes of idle time have elapsed. Starting cold, the initial agis call will take a few extra seconds to get the model loaded into memory and to feed in the first system prompt of the session. Subsequent calls will be notably faster.
 
@@ -57,7 +56,7 @@ An agis session keeps the model primed until 10 minutes of idle time have elapse
 | `-C`, `--dir` | Work in another folder |
 | `-v`, `--verbose` | Show the file context and raw plans |
 
-Outputs are named after their inputs and steps (`roads_clipped_3857.gpkg`) unless you name them. agis never overwrites an input. If the output name is already taken, it appends a number (`roads_clipped_3857_2.gpkg`); `--force` overwrites that file instead. Intermediate results of multi-step plans go to a temporary folder that is deleted afterwards.
+Outputs are named after their inputs and the operation (`roads_3857.gpkg`) unless you name them. agis never overwrites an input. If the output name is already taken, it appends a number (`roads_3857_2.gpkg`); `--force` overwrites that file instead.
 
 ### Operations
 
@@ -84,8 +83,8 @@ Requests that need anything else (slope, contours, and so on) get a short explan
 agis uses a plan-then-execute design built for small local models:
 
 1. **Context:** summarize the files in the folder and any the request mentions.
-2. **Plan:** one call to the model through Ollama, with output constrained to a JSON schema generated from the operation definitions, so the model can only produce well-formed plans.
-3. **Validate:** check every file, `$stepN` reference, CRS and output path. If the plan can't run, the problems go back to the model for one corrected attempt.
+2. **Plan:** one call to the model through Ollama, with output constrained to a JSON schema generated from the operation definitions, so the model can only produce one well-formed operation.
+3. **Validate:** check every file, CRS and output path. If the plan can't run, the problems go back to the model for one corrected attempt.
 4. **Preview and confirm**, then **execute** with GeoPandas, pyogrio, shapely, pyproj and rasterio. If a step fails, files from that run are removed and the error goes back to the model for one re-plan.
 
 The model never writes or runs code; it only fills in arguments for a fixed set of operations.
@@ -111,7 +110,7 @@ To add an operation, subclass `OpArgs` in `agis/ops/` with an `op: Literal["name
 ```bash
 uv venv && uv pip install -e ".[dev]"
 .venv/bin/pytest                  # unit tests, no model needed
-.venv/bin/agis eval -m qwen2.5:7b   # plan accuracy against tests/evals/cases.yaml
+.venv/bin/agis eval -m qwen2.5:3b   # plan accuracy against tests/evals/cases.yaml
 ```
 
 `agis eval` runs each case in `tests/evals/cases.yaml` against generated sample data and compares the plan to the expected one (CRSs, units and file names are normalized). Use it to compare models or check prompt changes; `--only` filters cases and `--show` prints every plan.

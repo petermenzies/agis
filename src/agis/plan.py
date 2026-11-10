@@ -17,11 +17,15 @@ Step = Annotated[typing.Union[tuple(REGISTRY.values())], Field(discriminator="op
 
 
 class Plan(BaseModel):
-    steps: list[Step] = Field(description="Operations to run, in order.")
+    steps: list[Step] = Field(
+        description="The one operation to run, or none if the request can't be done in one "
+        "operation."
+    )
     message: str = Field(
         "",
         description="One short sentence for the user. If the request can't be done with the "
-        "available operations, leave steps empty and explain why here.",
+        "available operations, or needs more than one operation, leave steps empty and "
+        "explain why here.",
     )
 
 
@@ -42,6 +46,7 @@ def plan_schema() -> dict:
     """
     schema = Plan.model_json_schema()
     schema["required"] = ["steps", "message"]
+    schema["properties"]["steps"]["maxItems"] = 1
     for definition in schema.get("$defs", {}).values():
         if "op" in definition.get("properties", {}):
             required = [r for r in definition.get("required", []) if r != "op"]

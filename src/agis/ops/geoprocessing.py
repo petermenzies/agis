@@ -16,7 +16,7 @@ from agis.errors import AgisError
 from agis.ops.base import OpArgs, StepResult
 from agis.ops.io import Kind, read_vector, require_kind, vector_mask, write_vector
 
-INPUT_DESC = 'Input file name, or "$stepN" to use the output of step N.'
+INPUT_DESC = "Input file name."
 OUTPUT_DESC = (
     "Output file name. Leave null unless the user names one. If they do, use the "
     "extension they gave; do not change the input's format."
@@ -105,7 +105,7 @@ class Clip(OpArgs):
     op: Literal["clip"] = "clip"
     input: str = Field(description=INPUT_DESC)
     mask: str | None = Field(
-        None, description='Vector file (or "$stepN") whose shapes define the clip area.'
+        None, description="Vector file whose shapes define the clip area."
     )
     bbox: list[float] | None = Field(
         None, description="Clip box as [minx, miny, maxx, maxy], used when there is no mask file."
@@ -164,7 +164,7 @@ class Clip(OpArgs):
 class Difference(OpArgs):
     op: Literal["difference"] = "difference"
     input: str = Field(description=INPUT_DESC)
-    other: str = Field(description='Vector file (or "$stepN") to subtract from the input.')
+    other: str = Field(description="Vector file to subtract from the input.")
     output: str | None = Field(None, description=OUTPUT_DESC)
 
     input_fields: ClassVar = ("input", "other")
@@ -189,7 +189,7 @@ class Difference(OpArgs):
 class Union(OpArgs):
     op: Literal["union"] = "union"
     input: str = Field(description=INPUT_DESC)
-    other: str = Field(description='Polygon vector file (or "$stepN") to union with the input.')
+    other: str = Field(description="Polygon vector file to union with the input.")
     output: str | None = Field(None, description=OUTPUT_DESC)
 
     input_fields: ClassVar = ("input", "other")

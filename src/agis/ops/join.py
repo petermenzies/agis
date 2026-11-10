@@ -22,7 +22,7 @@ class Join(OpArgs):
     op: Literal["join"] = "join"
     input: str = Field(description=INPUT_DESC)
     table: str = Field(
-        description='CSV, TSV, or vector file (or "$stepN") whose attributes are joined on. '
+        description="CSV, TSV, or vector file whose attributes are joined on. "
         "A vector file contributes columns, not geometry."
     )
     left_on: str | None = Field(

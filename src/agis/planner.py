@@ -12,11 +12,10 @@ from pydantic import ValidationError
 from agis.context import Context
 from agis.errors import LLMError, PlanError
 from agis.llm import Backend, Message
-from agis.ops.attributes import NUMERIC_OPS, Condition, Filter, Select, is_number
-from agis.ops.geoprocessing import Buffer, Clip, Difference, Info, Reproject
+from agis.ops.attributes import NUMERIC_OPS, Condition, Filter, is_number
+from agis.ops.geoprocessing import Info, Reproject
 from agis.ops.join import Join
 from agis.ops.merge import Merge
-from agis.ops.tiling import TileRaster
 from agis.plan import Plan, describe_ops, plan_schema, step_ref
 
 SYSTEM_PROMPT = """You are agis, a planner for GIS tasks. Turn the user's request into a JSON plan \
@@ -25,9 +24,10 @@ that uses only these operations:
 {ops}
 
 Rules:
+- Return exactly one operation. If the request needs two or more (clip then reproject, filter \
+then select, buffer then difference), return an empty steps list and tell the user to ask for \
+one operation at a time.
 - Use file names exactly as they appear in the Files list.
-- To use the result of an earlier step, set the file argument (input, mask, other, or any \
-other) to "$stepN", where N is the 1-based position of that step.
 - For attribute queries use one filter even when there are several tests: match "all" means \
 and, "any" means or. Use unique to list the distinct values of one attribute; it writes no \
 file. Do not add a select unless the user asks to keep columns. Don't reproject for these.
@@ -39,13 +39,13 @@ geometries should be combined into fewer shapes, and union for a polygon overlay
 - Only set "output" when the user names an output file, and use the extension they named. \
 Do not change .fgb, .shp, or .geojson to .gpkg. Otherwise leave it out; the name and the \
 input's format are kept automatically. Use convert when the user asks for a different format.
-- Only add the steps the user asked for. Clip, difference, union, buffer and merge handle \
-different CRSs themselves, so don't add reproject steps for them. Buffer accepts meters, \
-kilometers, feet or miles, so keep the user's distance and units as given.
+- Clip, difference, union, buffer and merge handle different CRSs themselves. Buffer accepts \
+meters, kilometers, feet or miles, so keep the user's distance and units as given.
 - Write CRSs as EPSG codes when you know them, e.g. "EPSG:3857" for web mercator.
 - If the request can't be done with these operations, or refers to a file that isn't listed, \
 return an empty steps list and explain why in message. Never substitute a different operation \
-for one that isn't available."""
+for one that isn't available. If part of the request isn't a supported operation, do the one \
+supported operation and explain the rest in message."""
 
 
 @dataclass
@@ -56,64 +56,6 @@ class Example:
 
 
 EXAMPLES = [
-    Example(
-        files="- parcels.shp: vector, Polygon, 5210 features, EPSG:2227, fields [apn:str, zoning:str]\n"
-        "- streams.gpkg: vector, LineString, 88 features, EPSG:4326, fields [name:str]",
-        request="buffer the streams by 30 m and cut those areas out of the parcels, "
-        "save it as buildable.gpkg",
-        plan=Plan(
-            steps=[
-                Buffer(input="streams.gpkg", distance=30, units="meters"),
-                Difference(input="parcels.shp", other="$step1", output="buildable.gpkg"),
-            ],
-            message="Buffer streams by 30 m, then remove the buffers from the parcels.",
-        ),
-    ),
-    Example(
-        files="- elevation.tif: raster, 1 band float32, 4000x3000 px, 10 metre pixels, EPSG:26910\n"
-        "- city.geojson: vector, Polygon, 1 features, EPSG:4326, fields [name:str]",
-        request="clip elevation to the city and make an MBTiles file up to zoom 14",
-        plan=Plan(
-            steps=[
-                Clip(input="elevation.tif", mask="city.geojson"),
-                TileRaster(input="$step1", max_zoom=14),
-            ],
-            message="Clip the elevation raster to the city, then write an MBTiles file up to zoom 14.",
-        ),
-    ),
-    Example(
-        files="- parcels.shp: vector, Polygon, 5210 features, EPSG:2227, "
-        "fields [apn:str, zoning:str, acres:float]",
-        request="residential parcels over 1 acre, keeping only apn and zoning, "
-        "save as residential.gpkg",
-        plan=Plan(
-            steps=[
-                Filter(
-                    input="parcels.shp",
-                    where=[
-                        Condition(field="zoning", op="==", value="residential"),
-                        Condition(field="acres", op=">", value="1"),
-                    ],
-                ),
-                Select(input="$step1", columns=["apn", "zoning"], output="residential.gpkg"),
-            ],
-            message="Keep residential parcels over 1 acre, with the apn and zoning columns.",
-        ),
-    ),
-    Example(
-        files="- shapes.fgb: vector, Polygon, 40 features, EPSG:4326, "
-        "fields [country_of_residence:str, sector:str, beds:int, name:str]",
-        request="keep shapes in Spain, then keep only the name column",
-        plan=Plan(
-            steps=[
-                Filter(input="shapes.fgb", where=[
-                    Condition(field="country_of_residence", op="==", value="Spain"),
-                ]),
-                Select(input="$step1", columns=["name"]),
-            ],
-            message="Keep shapes in Spain, then keep only the name column.",
-        ),
-    ),
     Example(
         files="- shapes.fgb: vector, Polygon, 40 features, EPSG:4326, "
         "fields [country_of_residence:str, sector:str, beds:int]",
@@ -176,6 +118,16 @@ EXAMPLES = [
         plan=Plan(
             steps=[Reproject(input="trails.kml", crs="EPSG:3857")],
             message="Reproject trails to Web Mercator (EPSG:3857).",
+        ),
+    ),
+    Example(
+        files="- streams.gpkg: vector, LineString, 88 features, EPSG:4326, fields [name:str]\n"
+        "- parcels.shp: vector, Polygon, 5210 features, EPSG:2227, fields [apn:str, zoning:str]",
+        request="buffer the streams by 30 m and cut those areas out of the parcels",
+        plan=Plan(
+            steps=[],
+            message="That needs two operations. Ask for one at a time: buffer the streams, "
+            "then cut the buffer out of the parcels.",
         ),
     ),
     Example(

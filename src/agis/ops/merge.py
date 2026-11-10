@@ -22,7 +22,7 @@ class Merge(OpArgs):
     input: str = Field(description=INPUT_DESC)
     others: list[str] = Field(
         min_length=1,
-        description='Vector files (or "$stepN") whose features are appended after the input, '
+        description="Vector files whose features are appended after the input, "
         "in this order.",
     )
     output: str | None = Field(None, description=OUTPUT_DESC)
