@@ -27,6 +27,7 @@ from agis.planner import (
     compact_json,
     fill_numbers,
     keep_named_outputs,
+    use_named_files,
 )
 from agis.sample_data import write_sample_data
 
@@ -98,7 +99,9 @@ def run_case(planner: Planner, case: dict, data_dir: Path, workdir: Path) -> Cas
     for attempt in range(2):
         try:
             plan = planner.plan(case["prompt"], context, feedback)
-            plan = fill_numbers(keep_named_outputs(plan, case["prompt"]), case["prompt"])
+            plan = fill_numbers(
+                keep_named_outputs(use_named_files(plan, case["prompt"]), case["prompt"]),
+                case["prompt"])
         except InvalidPlanOutput as exc:
             raw, plan = exc.raw, None
             feedback.append((exc.raw, exc.problems))

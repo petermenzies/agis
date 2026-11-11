@@ -27,7 +27,10 @@ Rules:
 - Return exactly one operation. If the request needs two or more (clip then reproject, filter \
 then select, buffer then difference), return an empty steps list and tell the user to ask for \
 one operation at a time.
-- Use file names exactly as they appear in the Files list.
+- Use file names exactly as they appear in the Files list. When the user includes an \
+extension, that file is the input. Another file with the same name and a different extension \
+is not a substitute and is not a second operation. A named input is not an output unless they \
+say to save or write to that name.
 - For attribute queries use one filter even when there are several tests: match "all" means \
 and, "any" means or. Use unique to list the distinct values of one attribute; it writes no \
 file. Do not add a select unless the user asks to keep columns. Don't reproject for these.
@@ -161,10 +164,52 @@ def compact_json(plan: Plan) -> str:
     return json.dumps({"steps": steps, "message": plan.message})
 
 
+def use_named_files(plan: Plan, request: str) -> Plan:
+    """Use the extension the request names when a step picked another file with the same stem.
+
+    A stem named with two extensions is left as the model wrote it.
+    """
+    chosen = _chosen_names(request)
+    if not chosen:
+        return plan
+    steps = []
+    for step in plan.steps:
+        update = {}
+        for name in step.input_fields:
+            raw = getattr(step, name, None)
+            values = raw if isinstance(raw, list) else [raw]
+            fixed = [_named_file(value, chosen) for value in values]
+            if fixed != values:
+                update[name] = fixed if isinstance(raw, list) else fixed[0]
+        steps.append(step.model_copy(update=update) if update else step)
+    return plan.model_copy(update={"steps": steps})
+
+
+def _chosen_names(request: str) -> dict[str, str]:
+    """Stem to the one filename the request uses for it, in the user's spelling."""
+    by_stem: dict[str, dict[str, str]] = {}
+    for token in re.findall(r"[\w~./\\-]+\.[A-Za-z0-9]+", request):
+        name = Path(token).name
+        spellings = by_stem.setdefault(Path(name).stem.casefold(), {})
+        spellings.setdefault(name.casefold(), name)
+    return {stem: next(iter(names.values())) for stem, names in by_stem.items() if len(names) == 1}
+
+
+def _named_file(value, chosen: dict[str, str]):
+    if not isinstance(value, str) or step_ref(value) is not None:
+        return value
+    target = chosen.get(Path(value).stem.casefold())
+    if target and Path(target).name.casefold() != Path(value).name.casefold():
+        return target
+    return value
+
+
 def keep_named_outputs(plan: Plan, request: str) -> Plan:
     """Clear output names the request doesn't mention, so they are generated instead.
 
     A name given without an extension keeps the stem; the executor adds the input's format.
+    An output that repeats the step's input name is cleared too, unless the user said to
+    save or write to that name.
     """
     plan = link_steps(plan)
     inputs = {
@@ -172,12 +217,24 @@ def keep_named_outputs(plan: Plan, request: str) -> Plan:
         for step in plan.steps for name in step.input_fields
         for value in _file_values(getattr(step, name, None))
     }
+    named = _save_as(request)
     steps = []
     for step in plan.steps:
         output = getattr(step, "output", None)
         if output:
             path = Path(output)
-            if _mentions(request, output) or _mentions(request, path.name):
+            input_names = {
+                Path(value).name.casefold()
+                for field in step.input_fields
+                for value in _file_values(getattr(step, field, None))
+            }
+            repeats_input = path.name.casefold() in input_names
+            saved_as_this = (
+                named is not None and Path(named).name.casefold() == path.name.casefold()
+            )
+            if repeats_input and not saved_as_this:
+                output = None
+            elif _mentions(request, output) or _mentions(request, path.name):
                 pass
             elif path.stem.casefold() not in inputs and _mentions(request, path.stem):
                 output = str(path.with_suffix(""))
@@ -186,7 +243,6 @@ def keep_named_outputs(plan: Plan, request: str) -> Plan:
         if output != getattr(step, "output", None):
             step = step.model_copy(update={"output": output})
         steps.append(step)
-    named = _save_as(request)
     last = steps[-1] if steps else None
     if (named and last is not None and "output" in type(last).model_fields
             and not any(getattr(s, "output", None) for s in steps)):

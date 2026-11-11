@@ -22,6 +22,7 @@ from agis.planner import (
     compact_json,
     fill_numbers,
     keep_named_outputs,
+    use_named_files,
 )
 
 
@@ -117,7 +118,8 @@ class Session:
         def work() -> None:
             try:
                 plan = planner.plan(request, context, feedback)
-                box["plan"] = fill_numbers(keep_named_outputs(plan, request), request)
+                box["plan"] = fill_numbers(
+                    keep_named_outputs(use_named_files(plan, request), request), request)
             except Exception as exc:  # noqa: BLE001  re-raised on the calling thread
                 box["error"] = exc
 

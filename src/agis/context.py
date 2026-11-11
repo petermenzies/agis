@@ -72,15 +72,24 @@ def find_datasets(cwd: Path) -> list[Path]:
 
 
 def mentioned_files(prompt: str, cwd: Path, datasets: list[Path]) -> list[Path]:
-    """Files named in the prompt, by path ("data/roads.shp") or by bare name ("roads")."""
+    """Files named in the prompt, by path ("data/roads.shp") or by bare name ("roads").
+
+    A name that already includes an extension pins that stem, so land.geojson does not also
+    describe land.gpkg. A bare name still matches every file with that stem.
+    """
     found: list[Path] = []
+    pinned: set[str] = set()
     for token in re.findall(r"[\w~./\\-]+\.[A-Za-z0-9]+", prompt):
         path = Path(token).expanduser()
         path = path if path.is_absolute() else cwd / path
         if is_dataset(path):
             found.append(path.resolve())
+            pinned.add(path.stem.lower())
     words = {w.lower() for w in re.findall(r"[\w-]+", prompt)}
-    found += [p for p in datasets if p.stem.lower() in words or p.name.lower() in words]
+    found += [
+        p for p in datasets
+        if p.stem.lower() not in pinned and (p.stem.lower() in words or p.name.lower() in words)
+    ]
     return _unique(found)
 
 

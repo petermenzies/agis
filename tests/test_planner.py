@@ -1,9 +1,10 @@
 import pytest
 
 from agis.ops.attributes import Condition, Filter
-from agis.ops.geoprocessing import Buffer, Difference, Info, Reproject
+from agis.ops.geoprocessing import Buffer, Clip, Difference, Info, Reproject
+from agis.ops.merge import Merge
 from agis.plan import Plan
-from agis.planner import fill_numbers, keep_named_outputs
+from agis.planner import fill_numbers, keep_named_outputs, use_named_files
 
 
 def _chain(value):
@@ -102,3 +103,56 @@ def test_a_save_as_name_the_model_left_out_goes_on_the_last_step():
 def test_steps_without_output_are_untouched():
     plan = Plan(steps=[Info(input="roads.gpkg")])
     assert keep_named_outputs(plan, "what is in roads.gpkg").steps == plan.steps
+
+
+def test_a_named_extension_replaces_the_same_stem_sibling():
+    plan = Plan(steps=[Reproject(
+        input="osm_land_polygons.gpkg", crs="EPSG:3857", output="osm_land_polygons.geojson",
+    )])
+    request = "make osm_land_polygons.geojson crs 3857"
+    fixed = keep_named_outputs(use_named_files(plan, request), request)
+    assert fixed.steps[0].input == "osm_land_polygons.geojson"
+    assert fixed.steps[0].output is None
+
+
+def test_two_named_extensions_are_left_alone():
+    plan = Plan(steps=[Reproject(input="osm_land_polygons.gpkg", crs="EPSG:3857")])
+    request = "reproject osm_land_polygons.gpkg, not osm_land_polygons.geojson"
+    assert use_named_files(plan, request).steps[0].input == "osm_land_polygons.gpkg"
+
+
+def test_use_named_files_leaves_step_references():
+    plan = Plan(steps=[
+        Reproject(input="fishing.fgb", crs="EPSG:3857"),
+        Buffer(input="$step1", distance=1),
+    ])
+    assert use_named_files(plan, "reproject fishing.fgb").steps[1].input == "$step1"
+
+
+def test_a_named_extension_replaces_another_input_field():
+    plan = Plan(steps=[Clip(input="roads.gpkg", mask="county.gpkg")])
+    fixed = use_named_files(plan, "clip roads.gpkg to county.geojson")
+    assert fixed.steps[0].input == "roads.gpkg"
+    assert fixed.steps[0].mask == "county.geojson"
+
+
+def test_a_named_extension_replaces_a_file_in_a_list():
+    plan = Plan(steps=[Merge(input="zones.gpkg", others=["parks.gpkg"])])
+    fixed = use_named_files(plan, "append parks.geojson onto zones.gpkg")
+    assert fixed.steps[0].others == ["parks.geojson"]
+
+
+def test_a_different_output_name_is_kept():
+    plan = Plan(steps=[Reproject(input="parks.geojson", crs="EPSG:3857", output="parks.gpkg")])
+    request = "reproject parks.geojson to parks.gpkg"
+    cleaned = keep_named_outputs(use_named_files(plan, request), request)
+    assert cleaned.steps[0].input == "parks.geojson"
+    assert cleaned.steps[0].output == "parks.gpkg"
+
+
+def test_save_as_the_input_name_is_kept():
+    plan = Plan(steps=[Reproject(
+        input="osm_land_polygons.geojson", crs="EPSG:3857", output="osm_land_polygons.geojson",
+    )])
+    request = "reproject osm_land_polygons.geojson save as osm_land_polygons.geojson"
+    assert keep_named_outputs(plan, request).steps[0].output == "osm_land_polygons.geojson"

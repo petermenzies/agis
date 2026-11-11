@@ -16,6 +16,19 @@ from agis.context import (
 from agis.ops.io import read_vector
 
 
+def test_an_extension_does_not_describe_a_same_stem_sibling(tmp_path):
+    frame = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs="EPSG:4326")
+    frame.to_file(tmp_path / "land.geojson")
+    frame.to_file(tmp_path / "land.gpkg")
+    named = build_context("reproject land.geojson to 3857", tmp_path).render()
+    assert "land.geojson: vector" in named
+    assert "land.gpkg: vector" not in named
+    assert "land.gpkg" in named.split("Other files: ", 1)[1]
+    bare = build_context("reproject land", tmp_path).render()
+    assert "land.geojson: vector" in bare
+    assert "land.gpkg: vector" in bare
+
+
 def test_named_file_is_described_and_the_rest_are_listed(data, tmp_path):
     text = build_context("reproject roads", tmp_path).render()
     assert "roads.gpkg: vector" in text
