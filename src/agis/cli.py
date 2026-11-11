@@ -243,12 +243,29 @@ def _prompt_session(completer: DatasetCompleter):
     if not sys.stdin.isatty():
         return None
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.filters import has_completions
     from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
 
     path = config_mod.config_path().parent / "history"
     path.parent.mkdir(parents=True, exist_ok=True)
+    bindings = KeyBindings()
+
+    @bindings.add("enter", filter=has_completions, eager=True)
+    @bindings.add("tab", filter=has_completions, eager=True)
+    @bindings.add("c-i", filter=has_completions, eager=True)
+    def _choose_completion(event):
+        """Insert the highlighted file and close the menu, without running the line."""
+        buff = event.current_buffer
+        state = buff.complete_state
+        if state is None:
+            return
+        if state.current_completion is None and state.completions:
+            buff.go_to_completion(0)
+        buff.complete_state = None
+
     return PromptSession(history=FileHistory(str(path)), completer=completer,
-                         complete_while_typing=False)
+                         complete_while_typing=False, key_bindings=bindings)
 
 
 _BUILTINS = {"ls", "cd", "pwd"}

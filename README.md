@@ -41,7 +41,7 @@ agis "make an MBTiles file from ortho.tif up to zoom 16"
 agis "what projection is dem.tif in?"
 ```
 
-`agis` on its own opens the prompt. Arrow keys move through the line you are typing, and up and down walk requests from this session and from earlier ones (`~/.config/agis/history`). Tab completes dataset names in the working folder. `ls`, `cd`, and `pwd` run locally and are not sent to the model. `exit` or Ctrl-D quits. A quoted request still runs once and exits.
+`agis` on its own opens the prompt. Arrow keys move through the line you are typing, and up and down walk requests from this session and from earlier ones (`~/.config/agis/history`). Tab completes dataset names in the working folder. When that menu is open, Enter or Tab inserts the highlighted name. `ls`, `cd`, and `pwd` run locally and are not sent to the model. `exit` or Ctrl-D quits. A quoted request still runs once and exits.
 
 agis reads the files in the current folder (CRS, geometry type, fields, raster bands) so the model knows what it's working with. It always shows the plan before running it. Each request is one operation. A request that needs two gets a short explanation instead of a plan; ask for the next operation afterwards.
 
